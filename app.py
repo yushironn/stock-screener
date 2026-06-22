@@ -60,9 +60,12 @@ def format_display(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+TENDENCY_DISPLAY_COLUMNS = ["出来高傾向", "継続率(参考)", "反落率(参考)", "サンプル数"]
+
+
 def add_tendency_summary(df: pd.DataFrame) -> pd.DataFrame:
     """
-    出来高比率に基づく過去データの傾向(継続率/反落率)を1列の説明文にまとめる。
+    出来高比率に基づく過去データの傾向(継続率/反落率)を、列を分けて見やすく追加する。
     あくまで過去の統計的な傾向であり、個別銘柄の将来を予測するものではない。
     """
     df = df.copy()
@@ -70,15 +73,14 @@ def add_tendency_summary(df: pd.DataFrame) -> pd.DataFrame:
     if not required.issubset(df.columns):
         return df
 
-    def _fmt(row) -> str | None:
-        if pd.isna(row["vol_tendency"]):
-            return None
-        return (
-            f"{row['vol_tendency']} → 過去データで継続{row['tendency_continuation_rate']:.0f}%"
-            f"/反落{row['tendency_pullback_rate']:.0f}%(n={int(row['tendency_n'])})"
-        )
-
-    df["出来高傾向(過去統計・参考値)"] = df.apply(_fmt, axis=1)
+    df["出来高傾向"] = df["vol_tendency"]
+    df["継続率(参考)"] = df["tendency_continuation_rate"].apply(
+        lambda v: f"{v:.0f}%" if pd.notna(v) else None
+    )
+    df["反落率(参考)"] = df["tendency_pullback_rate"].apply(
+        lambda v: f"{v:.0f}%" if pd.notna(v) else None
+    )
+    df["サンプル数"] = df["tendency_n"].apply(lambda v: f"n={int(v)}" if pd.notna(v) else None)
     return df
 
 
@@ -286,8 +288,8 @@ if new_highs.empty:
 else:
     new_highs_with_tendency = add_tendency_summary(new_highs)
     columns = ["code", "name", "date", "close", "prior_52w_high", "pct_vs_prior_high"]
-    if "出来高傾向(過去統計・参考値)" in new_highs_with_tendency.columns:
-        columns += ["出来高傾向(過去統計・参考値)"]
+    if "出来高傾向" in new_highs_with_tendency.columns:
+        columns += TENDENCY_DISPLAY_COLUMNS
     if show_fundamentals:
         columns += ["増収", "増益"]
     closed_at_high_new_highs = new_highs["close"] == new_highs["today_high"]
