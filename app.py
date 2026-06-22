@@ -34,6 +34,17 @@ COLUMN_LABELS_JA = {
     "trading_days_since_high": "経過営業日数",
 }
 
+PRICE_COLUMNS = ["close", "today_high", "prior_52w_high"]
+
+
+def format_prices(df: pd.DataFrame) -> pd.DataFrame:
+    """価格列を小数点以下切り捨て・カンマ区切りの文字列にする。"""
+    df = df.copy()
+    for col in PRICE_COLUMNS:
+        if col in df.columns:
+            df[col] = df[col].apply(lambda v: f"{int(v):,}" if pd.notna(v) else v)
+    return df
+
 st.set_page_config(page_title="52週来高値スクリーナー", layout="wide")
 
 st.title("📈 52週来高値スクリーナー(プロトタイプ)")
@@ -240,7 +251,7 @@ else:
     if show_fundamentals:
         columns += ["増収", "増益"]
     event = st.dataframe(
-        new_highs[columns].rename(columns=COLUMN_LABELS_JA),
+        format_prices(new_highs[columns]).rename(columns=COLUMN_LABELS_JA),
         use_container_width=True,
         hide_index=True,
         on_select="rerun",
@@ -277,7 +288,7 @@ else:
 st.subheader("📋 全銘柄ランキング(52週高値からの距離順)")
 is_new_high_series = result["new_52w_high"]
 event = st.dataframe(
-    result.rename(columns=COLUMN_LABELS_JA).style.apply(
+    format_prices(result).rename(columns=COLUMN_LABELS_JA).style.apply(
         lambda row: ["background-color: #fff3b0" if is_new_high_series.loc[row.name] else "" for _ in row],
         axis=1,
     ),
