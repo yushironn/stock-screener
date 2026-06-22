@@ -28,6 +28,39 @@ OUTPUT_FILE = Path(__file__).parent / "result.csv"
 CACHE_DIR = Path(__file__).parent / "cache" / "prices"
 LOOKBACK_DAYS = 252  # 52週 ≒ 252営業日
 HISTORY_BUFFER_DAYS = 800  # 52週判定の土台(約1年)+ 直近更新日を探索する期間(約1年)
+VOL_AVG_WINDOW = 20  # 出来高比率を計算する際の平均期間
+
+# 自社データ(日本株3,664銘柄、2024/3〜2026/6、52週高値更新イベント21,920件)による
+# 実証分析の結果。「新高値更新時の出来高が直前20日平均の何倍だったか」によって、
+# その後20営業日の値動きにどんな傾向があったかを集計したもの。
+# あくまで過去の傾向であり、個別銘柄の将来を保証するものではない。
+VOLUME_TENDENCY_BUCKETS = [
+    (0.0, 0.5, "出来高小(0.5倍未満)", 92.0, 13.9, 474),
+    (0.5, 1.0, "出来高やや少なめ(0.5〜1.0倍)", 91.5, 15.4, 5785),
+    (1.0, 1.5, "出来高平常(1.0〜1.5倍)", 90.9, 17.6, 6454),
+    (1.5, 2.0, "出来高やや多め(1.5〜2.0倍)", 89.0, 19.5, 3042),
+    (2.0, 3.0, "出来高多い(2.0〜3.0倍)", 85.4, 22.4, 2508),
+    (3.0, float("inf"), "出来高急増(3.0倍以上)", 72.9, 37.0, 3657),
+]
+
+
+def _volume_tendency(vol_ratio: float | None) -> dict | None:
+    """
+    出来高比率から、過去データに基づく「その後20営業日の傾向」を返す。
+    継続率: その後さらに高値を更新した割合。反落率: 終値が当日高値から10%以上
+    切り下がった割合(いずれも自社データの過去集計、件数nが大きいほど参考になる)。
+    """
+    if vol_ratio is None or pd.isna(vol_ratio):
+        return None
+    for low, high, label, continuation_rate, pullback_rate, n in VOLUME_TENDENCY_BUCKETS:
+        if low <= vol_ratio < high:
+            return {
+                "label": label,
+                "continuation_rate": continuation_rate,
+                "pullback_rate": pullback_rate,
+                "n": n,
+            }
+    return None
 
 
 def load_tickers(path: Path = TICKERS_FILE) -> list[dict]:
@@ -177,6 +210,13 @@ def screen(tickers: list[dict], as_of: str | date | None = None) -> pd.DataFrame
         today_close = today["Close"]
         is_new_high = today_high >= prior_52w_high
 
+        vol_ratio = None
+        if "Volume" in df.columns and len(df) >= VOL_AVG_WINDOW + 1:
+            avg_vol = df["Volume"].iloc[-(VOL_AVG_WINDOW + 1):-1].mean()
+            if avg_vol and avg_vol > 0:
+                vol_ratio = float(df["Volume"].iloc[-1] / avg_vol)
+        tendency = _volume_tendency(vol_ratio) if is_new_high else None
+
         rows.append(
             {
                 "code": code,
@@ -189,6 +229,11 @@ def screen(tickers: list[dict], as_of: str | date | None = None) -> pd.DataFrame
                 "pct_vs_prior_high": round(
                     float((today_high / prior_52w_high - 1) * 100), 2
                 ),
+                "vol_ratio": round(vol_ratio, 2) if vol_ratio is not None else None,
+                "vol_tendency": tendency["label"] if tendency else None,
+                "tendency_continuation_rate": tendency["continuation_rate"] if tendency else None,
+                "tendency_pullback_rate": tendency["pullback_rate"] if tendency else None,
+                "tendency_n": tendency["n"] if tendency else None,
                 "latest_52w_high_date": (
                     latest_new_high_date.strftime("%Y-%m-%d")
                     if latest_new_high_date is not None

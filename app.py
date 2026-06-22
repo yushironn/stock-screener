@@ -60,6 +60,28 @@ def format_display(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def add_tendency_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    出来高比率に基づく過去データの傾向(継続率/反落率)を1列の説明文にまとめる。
+    あくまで過去の統計的な傾向であり、個別銘柄の将来を予測するものではない。
+    """
+    df = df.copy()
+    required = {"vol_tendency", "tendency_continuation_rate", "tendency_pullback_rate", "tendency_n"}
+    if not required.issubset(df.columns):
+        return df
+
+    def _fmt(row) -> str | None:
+        if pd.isna(row["vol_tendency"]):
+            return None
+        return (
+            f"{row['vol_tendency']} → 過去データで継続{row['tendency_continuation_rate']:.0f}%"
+            f"/反落{row['tendency_pullback_rate']:.0f}%(n={int(row['tendency_n'])})"
+        )
+
+    df["出来高傾向(過去統計・参考値)"] = df.apply(_fmt, axis=1)
+    return df
+
+
 st.set_page_config(page_title="52週来高値スクリーナー", layout="wide")
 
 st.title("📈 52週来高値スクリーナー(プロトタイプ)")
@@ -262,12 +284,15 @@ st.subheader(f"🎯 {as_of_date} 時点で52週来高値を更新した銘柄({l
 if new_highs.empty:
     st.info("該当銘柄はありません。")
 else:
+    new_highs_with_tendency = add_tendency_summary(new_highs)
     columns = ["code", "name", "date", "close", "prior_52w_high", "pct_vs_prior_high"]
+    if "出来高傾向(過去統計・参考値)" in new_highs_with_tendency.columns:
+        columns += ["出来高傾向(過去統計・参考値)"]
     if show_fundamentals:
         columns += ["増収", "増益"]
     closed_at_high_new_highs = new_highs["close"] == new_highs["today_high"]
     event = st.dataframe(
-        format_display(new_highs[columns]).rename(columns=COLUMN_LABELS_JA).style.apply(
+        format_display(new_highs_with_tendency[columns]).rename(columns=COLUMN_LABELS_JA).style.apply(
             lambda row: ["background-color: #ffb74d" if closed_at_high_new_highs.loc[row.name] else "" for _ in row],
             axis=1,
         ),
@@ -281,6 +306,10 @@ else:
     if rows:
         clicked = new_highs.iloc[rows[0]]
         st.session_state["chart_select"] = f"{clicked['code']} - {clicked['name']}"
+    st.caption(
+        "「出来高傾向」は自社データ(日本株3,664銘柄、52週高値更新21,920件、2024/3〜2026/6)に基づく"
+        "過去の統計的傾向であり、個別銘柄の将来の値動きを予測・保証するものではありません。"
+    )
 
 st.subheader("📅 選択銘柄の最新52週高値更新日(新しい順)")
 history = result.dropna(subset=["latest_52w_high_date"]).sort_values(
