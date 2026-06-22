@@ -345,12 +345,15 @@ if selected_code:
     if hist.empty:
         st.caption("チャート用データの取得に失敗しました(yfinanceがブロックされている可能性があります)。")
     else:
-        ma_windows = st.multiselect(
-            "移動平均線",
-            options=[5, 25, 75, 200],
-            default=[25, 75],
-            format_func=lambda d: f"{d}日",
-        )
+        st.caption("移動平均線")
+        ma_all_windows = [5, 25, 75, 200]
+        ma_default = {5: False, 25: True, 75: True, 200: False}
+        ma_cols = st.columns(len(ma_all_windows))
+        ma_windows = [
+            window
+            for window, col in zip(ma_all_windows, ma_cols)
+            if col.checkbox(f"{window}日", value=ma_default[window], key=f"ma_{window}")
+        ]
         prior_high = result.loc[result["code"] == selected_code, "prior_52w_high"].iloc[0]
         chart_df = hist[["Close"]].rename(columns={"Close": "終値"})
         colors = ["#e63946"]  # 終値を太く目立つ赤で強調
