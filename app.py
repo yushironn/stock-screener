@@ -265,8 +265,12 @@ else:
     columns = ["code", "name", "date", "close", "prior_52w_high", "pct_vs_prior_high"]
     if show_fundamentals:
         columns += ["増収", "増益"]
+    closed_at_high_new_highs = new_highs["close"] == new_highs["today_high"]
     event = st.dataframe(
-        format_display(new_highs[columns]).rename(columns=COLUMN_LABELS_JA),
+        format_display(new_highs[columns]).rename(columns=COLUMN_LABELS_JA).style.apply(
+            lambda row: ["background-color: #ffb74d" if closed_at_high_new_highs.loc[row.name] else "" for _ in row],
+            axis=1,
+        ),
         use_container_width=True,
         hide_index=True,
         on_select="rerun",
@@ -303,11 +307,19 @@ else:
 
 st.subheader("📋 全銘柄ランキング(52週高値からの距離順)")
 is_new_high_series = result["new_52w_high"]
+closed_at_high_series = result["new_52w_high"] & (result["close"] == result["today_high"])
+
+
+def _ranking_row_style(row):
+    if closed_at_high_series.loc[row.name]:
+        return ["background-color: #ffb74d" for _ in row]
+    if is_new_high_series.loc[row.name]:
+        return ["background-color: #fff3b0" for _ in row]
+    return ["" for _ in row]
+
+
 event = st.dataframe(
-    format_display(result).rename(columns=COLUMN_LABELS_JA).style.apply(
-        lambda row: ["background-color: #fff3b0" if is_new_high_series.loc[row.name] else "" for _ in row],
-        axis=1,
-    ),
+    format_display(result).rename(columns=COLUMN_LABELS_JA).style.apply(_ranking_row_style, axis=1),
     use_container_width=True,
     hide_index=True,
     on_select="rerun",
