@@ -24,16 +24,15 @@ CLOUD_MODE = os.environ.get("DEPLOY_ENV") == "cloud"
 st.set_page_config(page_title="52週来高値スクリーナー", layout="wide")
 
 st.title("📈 52週来高値スクリーナー(プロトタイプ)")
+st.caption(
+    "yfinance(Yahoo Finance)の無料データを使い、基準日時点の高値が"
+    "その基準日より前の過去252営業日(52週)の最高値を更新しているかを判定します。"
+    "データは約15分遅延、対象はtickers.csvに記載した銘柄のみです。"
+)
 if CLOUD_MODE:
     st.caption(
-        "クラウド版では、ローカルPCが定期取得した結果(tickers.csv全銘柄)を表示します。"
-        "銘柄の絞り込みはできますが、その場での再取得・日付変更はできません。"
-    )
-else:
-    st.caption(
-        "yfinance(Yahoo Finance)の無料データを使い、基準日時点の高値が"
-        "その基準日より前の過去252営業日(52週)の最高値を更新しているかを判定します。"
-        "データは約15分遅延、対象はtickers.csvに記載した銘柄のみです。"
+        "クラウド版はyfinanceがブロックされることがあるため、まずライブ取得を試し、"
+        "失敗した場合はローカルPCが定期取得した結果を表示します。"
     )
 
 master = load_tickers(TICKERS_FILE)
@@ -71,16 +70,12 @@ def _clear_all():
 
 with st.sidebar:
     st.header("設定")
-    if CLOUD_MODE:
-        as_of_date = None
-        st.caption("基準日: ローカルPCの最終更新日に固定(クラウド版では変更不可)")
-    else:
-        as_of_date = st.date_input(
-            "基準日",
-            value=date.today(),
-            max_value=date.today(),
-            help="この日付時点で52週高値を更新していたかを判定します。休日を指定した場合は直前の営業日が使われます。",
-        )
+    as_of_date = st.date_input(
+        "基準日",
+        value=date.today(),
+        max_value=date.today(),
+        help="この日付時点で52週高値を更新していたかを判定します。休日を指定した場合は直前の営業日が使われます。",
+    )
 
     st.subheader("銘柄を検索して追加")
     search_query = st.text_input("🔍 コードまたは銘柄名で検索", "")
@@ -118,10 +113,7 @@ with st.sidebar:
         label_visibility="collapsed",
     )
 
-    if CLOUD_MODE:
-        run_clicked = False
-    else:
-        run_clicked = st.button("🔄 スクリーニング実行", type="primary", use_container_width=True)
+    run_clicked = st.button("🔄 スクリーニング実行", type="primary", use_container_width=True)
 
     st.subheader("ファンダメンタルズ")
     used_calls, daily_limit = edinetdb.get_usage_today()
@@ -155,22 +147,31 @@ if not selected_codes:
     st.warning("左のサイドバーで銘柄を1つ以上選択してください。")
     st.stop()
 
-if CLOUD_MODE:
-    full_result = load_precomputed_result()
-    if full_result.empty:
-        st.warning("ローカルPCからの結果データがまだありません。")
-        st.stop()
-    as_of_date = full_result["date"].max()
-    result = full_result[full_result["code"].isin(selected_codes)].reset_index(drop=True)
-else:
-    if run_clicked or st.session_state.result is None:
-        with st.spinner("データ取得中..."):
+used_fallback = False
+
+if run_clicked or st.session_state.result is None:
+    with st.spinner("データ取得中..."):
+        try:
             st.session_state.result = run_screen(tuple(selected_codes), as_of_date)
-    result = st.session_state.result
+        except Exception:
+            st.session_state.result = pd.DataFrame()
+result = st.session_state.result
+
+if (result is None or result.empty) and CLOUD_MODE:
+    full_result = load_precomputed_result()
+    if not full_result.empty:
+        used_fallback = True
+        as_of_date = full_result["date"].max()
+        result = full_result[full_result["code"].isin(selected_codes)].reset_index(drop=True)
 
 if result is None or result.empty:
     st.warning("データを取得できませんでした。銘柄コードや基準日を確認してください。")
     st.stop()
+
+if used_fallback:
+    st.info(
+        f"ライブ取得に失敗したため、ローカルPCが最後に更新した結果(基準日: {as_of_date})を表示しています。"
+    )
 
 if show_fundamentals:
 
@@ -259,20 +260,22 @@ st.dataframe(
     hide_index=True,
 )
 
-if CLOUD_MODE:
-    st.caption("📊 個別銘柄チャートはクラウド版では利用できません(yfinanceのライブ取得が必要なため、ローカル版をご利用ください)。")
-else:
-    st.subheader("📊 個別銘柄チャート")
-    selected_code = st.selectbox("銘柄を選択", result["code"].tolist())
-    if selected_code:
+st.subheader("📊 個別銘柄チャート")
+selected_code = st.selectbox("銘柄を選択", result["code"].tolist())
+if selected_code:
+    try:
         hist = yf.Ticker(selected_code).history(period="1y")
-        if not hist.empty:
-            prior_high = result.loc[result["code"] == selected_code, "prior_52w_high"].iloc[0]
-            chart_df = hist[["Close", "High"]].copy()
-            chart_df["52週高値ライン"] = prior_high
-            st.line_chart(chart_df.rename(columns={"Close": "終値", "High": "高値"}))
+    except Exception:
+        hist = pd.DataFrame()
+    if hist.empty:
+        st.caption("チャート用データの取得に失敗しました(yfinanceがブロックされている可能性があります)。")
+    else:
+        prior_high = result.loc[result["code"] == selected_code, "prior_52w_high"].iloc[0]
+        chart_df = hist[["Close", "High"]].copy()
+        chart_df["52週高値ライン"] = prior_high
+        st.line_chart(chart_df.rename(columns={"Close": "終値", "High": "高値"}))
 
-if CLOUD_MODE:
-    st.caption(f"データ基準日: {as_of_date}(ローカルPCの定期更新による)")
+if used_fallback:
+    st.caption(f"データ基準日: {as_of_date}(ローカルPCの定期更新による、ライブ取得失敗時のフォールバック)")
 else:
     st.caption("結果はキャッシュされ、5分間は再取得しません。最新化するには左の「スクリーニング実行」を押してください。")
