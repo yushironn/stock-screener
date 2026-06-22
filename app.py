@@ -348,7 +348,7 @@ if selected_code:
         st.caption("移動平均線")
         ma_all_windows = [5, 25, 75, 200]
         ma_default = {5: False, 25: True, 75: True, 200: False}
-        ma_cols = st.columns(len(ma_all_windows))
+        ma_cols = st.columns([1] * len(ma_all_windows) + [8])
         ma_windows = [
             window
             for window, col in zip(ma_all_windows, ma_cols)
