@@ -239,11 +239,18 @@ else:
     columns = ["code", "name", "date", "close", "prior_52w_high", "pct_vs_prior_high"]
     if show_fundamentals:
         columns += ["増収", "増益"]
-    st.dataframe(
+    event = st.dataframe(
         new_highs[columns].rename(columns=COLUMN_LABELS_JA),
         use_container_width=True,
         hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key="new_highs_table",
     )
+    rows = event.selection["rows"]
+    if rows:
+        clicked = new_highs.iloc[rows[0]]
+        st.session_state["chart_select"] = f"{clicked['code']} - {clicked['name']}"
 
 st.subheader("📅 選択銘柄の最新52週高値更新日(新しい順)")
 history = result.dropna(subset=["latest_52w_high_date"]).sort_values(
@@ -252,28 +259,44 @@ history = result.dropna(subset=["latest_52w_high_date"]).sort_values(
 if history.empty:
     st.info("探索範囲(約1年)内に52週高値を更新した銘柄がありません。")
 else:
-    st.dataframe(
+    event = st.dataframe(
         history[["code", "name", "latest_52w_high_date", "trading_days_since_high"]].rename(
             columns=COLUMN_LABELS_JA
         ),
         use_container_width=True,
         hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key="history_table",
     )
+    rows = event.selection["rows"]
+    if rows:
+        clicked = history.iloc[rows[0]]
+        st.session_state["chart_select"] = f"{clicked['code']} - {clicked['name']}"
 
 st.subheader("📋 全銘柄ランキング(52週高値からの距離順)")
 is_new_high_series = result["new_52w_high"]
-st.dataframe(
+event = st.dataframe(
     result.rename(columns=COLUMN_LABELS_JA).style.apply(
         lambda row: ["background-color: #fff3b0" if is_new_high_series.loc[row.name] else "" for _ in row],
         axis=1,
     ),
     use_container_width=True,
     hide_index=True,
+    on_select="rerun",
+    selection_mode="single-row",
+    key="ranking_table",
 )
+rows = event.selection["rows"]
+if rows:
+    clicked = result.iloc[rows[0]]
+    st.session_state["chart_select"] = f"{clicked['code']} - {clicked['name']}"
 
 st.subheader("📊 個別銘柄チャート")
 chart_labels = (result["code"] + " - " + result["name"]).tolist()
-selected_label = st.selectbox("銘柄を選択", chart_labels)
+if st.session_state.get("chart_select") not in chart_labels:
+    st.session_state["chart_select"] = chart_labels[0] if chart_labels else None
+selected_label = st.selectbox("銘柄を選択", chart_labels, key="chart_select")
 selected_code = selected_label.split(" - ", 1)[0] if selected_label else None
 if selected_code:
     try:
