@@ -261,7 +261,9 @@ st.dataframe(
 )
 
 st.subheader("📊 個別銘柄チャート")
-selected_code = st.selectbox("銘柄を選択", result["code"].tolist())
+chart_labels = (result["code"] + " - " + result["name"]).tolist()
+selected_label = st.selectbox("銘柄を選択", chart_labels)
+selected_code = selected_label.split(" - ", 1)[0] if selected_label else None
 if selected_code:
     try:
         hist = yf.Ticker(selected_code).history(period="1y")
