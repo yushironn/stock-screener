@@ -270,10 +270,12 @@ history = result.dropna(subset=["latest_52w_high_date"]).sort_values(
 if history.empty:
     st.info("探索範囲(約1年)内に52週高値を更新した銘柄がありません。")
 else:
+    history_display = history[["code", "name", "latest_52w_high_date", "trading_days_since_high"]].copy()
+    history_display["trading_days_since_high"] = history_display["trading_days_since_high"].apply(
+        lambda v: f"{int(v)}日" if pd.notna(v) else v
+    )
     event = st.dataframe(
-        history[["code", "name", "latest_52w_high_date", "trading_days_since_high"]].rename(
-            columns=COLUMN_LABELS_JA
-        ),
+        history_display.rename(columns=COLUMN_LABELS_JA),
         use_container_width=True,
         hide_index=True,
         on_select="rerun",
