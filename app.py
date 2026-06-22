@@ -9,7 +9,6 @@ import os
 from datetime import date
 from pathlib import Path
 
-import altair as alt
 import pandas as pd
 import streamlit as st
 import yfinance as yf
@@ -360,18 +359,7 @@ if selected_code:
             colors.append("#a8a8a8")
         chart_df["52週高値ライン"] = prior_high
         colors.append("#457b9d")
-
-        long_df = chart_df.reset_index().melt(id_vars=chart_df.index.name or "Date", var_name="系列", value_name="値")
-        date_col = chart_df.index.name or "Date"
-        long_df["線種"] = long_df["系列"].apply(lambda s: "dashed" if "移動平均" in s else "solid")
-
-        chart = alt.Chart(long_df).mark_line().encode(
-            x=alt.X(f"{date_col}:T", title="日付"),
-            y=alt.Y("値:Q", title="価格"),
-            color=alt.Color("系列:N", scale=alt.Scale(domain=list(chart_df.columns), range=colors), title="系列"),
-            strokeDash=alt.StrokeDash("線種:N", legend=None),
-        )
-        st.altair_chart(chart, use_container_width=True)
+        st.line_chart(chart_df, color=colors)
 
 if used_fallback:
     st.caption(f"データ基準日: {as_of_date}(ローカルPCの定期更新による、ライブ取得失敗時のフォールバック)")
