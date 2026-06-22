@@ -45,6 +45,21 @@ def format_prices(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = df[col].apply(lambda v: f"{int(v):,}" if pd.notna(v) else v)
     return df
 
+
+def format_display(df: pd.DataFrame) -> pd.DataFrame:
+    """価格列・差分(%)・経過営業日数の表記を表示用に統一する。"""
+    df = format_prices(df)
+    if "pct_vs_prior_high" in df.columns:
+        df["pct_vs_prior_high"] = df["pct_vs_prior_high"].apply(
+            lambda v: f"{v:.2f}" if pd.notna(v) else v
+        )
+    if "trading_days_since_high" in df.columns:
+        df["trading_days_since_high"] = df["trading_days_since_high"].apply(
+            lambda v: f"{int(v)}日" if pd.notna(v) else v
+        )
+    return df
+
+
 st.set_page_config(page_title="52週来高値スクリーナー", layout="wide")
 
 st.title("📈 52週来高値スクリーナー(プロトタイプ)")
@@ -251,7 +266,7 @@ else:
     if show_fundamentals:
         columns += ["増収", "増益"]
     event = st.dataframe(
-        format_prices(new_highs[columns]).rename(columns=COLUMN_LABELS_JA),
+        format_display(new_highs[columns]).rename(columns=COLUMN_LABELS_JA),
         use_container_width=True,
         hide_index=True,
         on_select="rerun",
@@ -270,9 +285,8 @@ history = result.dropna(subset=["latest_52w_high_date"]).sort_values(
 if history.empty:
     st.info("探索範囲(約1年)内に52週高値を更新した銘柄がありません。")
 else:
-    history_display = history[["code", "name", "latest_52w_high_date", "trading_days_since_high"]].copy()
-    history_display["trading_days_since_high"] = history_display["trading_days_since_high"].apply(
-        lambda v: f"{int(v)}日" if pd.notna(v) else v
+    history_display = format_display(
+        history[["code", "name", "latest_52w_high_date", "trading_days_since_high"]]
     )
     event = st.dataframe(
         history_display.rename(columns=COLUMN_LABELS_JA),
@@ -290,7 +304,7 @@ else:
 st.subheader("📋 全銘柄ランキング(52週高値からの距離順)")
 is_new_high_series = result["new_52w_high"]
 event = st.dataframe(
-    format_prices(result).rename(columns=COLUMN_LABELS_JA).style.apply(
+    format_display(result).rename(columns=COLUMN_LABELS_JA).style.apply(
         lambda row: ["background-color: #fff3b0" if is_new_high_series.loc[row.name] else "" for _ in row],
         axis=1,
     ),
