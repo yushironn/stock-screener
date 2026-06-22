@@ -21,6 +21,19 @@ from screener import OUTPUT_FILE, TICKERS_FILE, load_tickers, screen
 # Streamlit CloudのSecretsに DEPLOY_ENV = "cloud" を設定して切り替える。
 CLOUD_MODE = os.environ.get("DEPLOY_ENV") == "cloud"
 
+COLUMN_LABELS_JA = {
+    "code": "コード",
+    "name": "銘柄名",
+    "date": "日付",
+    "close": "終値",
+    "today_high": "本日高値",
+    "prior_52w_high": "直前52週高値",
+    "new_52w_high": "52週高値更新",
+    "pct_vs_prior_high": "高値からの差分(%)",
+    "latest_52w_high_date": "最新更新日",
+    "trading_days_since_high": "経過営業日数",
+}
+
 st.set_page_config(page_title="52週来高値スクリーナー", layout="wide")
 
 st.title("📈 52週来高値スクリーナー(プロトタイプ)")
@@ -227,7 +240,7 @@ else:
     if show_fundamentals:
         columns += ["増収", "増益"]
     st.dataframe(
-        new_highs[columns],
+        new_highs[columns].rename(columns=COLUMN_LABELS_JA),
         use_container_width=True,
         hide_index=True,
     )
@@ -241,19 +254,17 @@ if history.empty:
 else:
     st.dataframe(
         history[["code", "name", "latest_52w_high_date", "trading_days_since_high"]].rename(
-            columns={
-                "latest_52w_high_date": "最新更新日",
-                "trading_days_since_high": "経過営業日数",
-            }
+            columns=COLUMN_LABELS_JA
         ),
         use_container_width=True,
         hide_index=True,
     )
 
 st.subheader("📋 全銘柄ランキング(52週高値からの距離順)")
+is_new_high_series = result["new_52w_high"]
 st.dataframe(
-    result.style.apply(
-        lambda row: ["background-color: #fff3b0" if row["new_52w_high"] else "" for _ in row],
+    result.rename(columns=COLUMN_LABELS_JA).style.apply(
+        lambda row: ["background-color: #fff3b0" if is_new_high_series.loc[row.name] else "" for _ in row],
         axis=1,
     ),
     use_container_width=True,
