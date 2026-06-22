@@ -217,7 +217,7 @@ if show_fundamentals:
     result["増収"] = result["code"].map(lambda c: _mark(c, "sales_growing"))
     result["増益"] = result["code"].map(lambda c: _mark(c, "profit_growing"))
 
-new_highs = result[result["new_52w_high"]]
+new_highs = result[result["new_52w_high"]].sort_values("code")
 
 st.subheader(f"🎯 {as_of_date} 時点で52週来高値を更新した銘柄({len(new_highs)}件)")
 if new_highs.empty:
