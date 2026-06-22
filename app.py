@@ -352,11 +352,14 @@ if selected_code:
             format_func=lambda d: f"{d}日",
         )
         prior_high = result.loc[result["code"] == selected_code, "prior_52w_high"].iloc[0]
-        chart_df = hist[["Close", "High"]].copy()
+        chart_df = hist[["Close"]].rename(columns={"Close": "終値"})
+        colors = ["#e63946"]  # 終値を太く目立つ赤で強調
         for window in ma_windows:
             chart_df[f"{window}日移動平均"] = hist["Close"].rolling(window=window).mean()
+            colors.append("#a8a8a8")
         chart_df["52週高値ライン"] = prior_high
-        st.line_chart(chart_df.rename(columns={"Close": "終値", "High": "高値"}))
+        colors.append("#457b9d")
+        st.line_chart(chart_df, color=colors)
 
 if used_fallback:
     st.caption(f"データ基準日: {as_of_date}(ローカルPCの定期更新による、ライブ取得失敗時のフォールバック)")
