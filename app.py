@@ -345,8 +345,16 @@ if selected_code:
     if hist.empty:
         st.caption("チャート用データの取得に失敗しました(yfinanceがブロックされている可能性があります)。")
     else:
+        ma_windows = st.multiselect(
+            "移動平均線",
+            options=[5, 25, 75, 200],
+            default=[25, 75],
+            format_func=lambda d: f"{d}日",
+        )
         prior_high = result.loc[result["code"] == selected_code, "prior_52w_high"].iloc[0]
         chart_df = hist[["Close", "High"]].copy()
+        for window in ma_windows:
+            chart_df[f"{window}日移動平均"] = hist["Close"].rolling(window=window).mean()
         chart_df["52週高値ライン"] = prior_high
         st.line_chart(chart_df.rename(columns={"Close": "終値", "High": "高値"}))
 
