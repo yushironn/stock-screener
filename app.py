@@ -84,6 +84,27 @@ def add_tendency_summary(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def render_ma_chart(hist: pd.DataFrame, prior_high: float, key_prefix: str) -> None:
+    """終値+移動平均線+52週高値ラインのチャートを描画する(チェックボックスのkeyは重複しないようprefixで区別)。"""
+    st.caption("移動平均線")
+    ma_all_windows = [25, 75, 200]
+    ma_default = {25: True, 75: True, 200: True}
+    ma_cols = st.columns([1] * len(ma_all_windows) + [8])
+    ma_windows = [
+        window
+        for window, col in zip(ma_all_windows, ma_cols)
+        if col.checkbox(f"{window}日", value=ma_default[window], key=f"{key_prefix}_ma_{window}")
+    ]
+    chart_df = hist[["Close"]].rename(columns={"Close": "終値"})
+    colors = ["#e63946"]  # 終値を太く目立つ赤で強調
+    for window in ma_windows:
+        chart_df[f"{window}日移動平均"] = hist["Close"].rolling(window=window).mean()
+        colors.append("#a8a8a8")
+    chart_df["52週高値ライン"] = prior_high
+    colors.append("#457b9d")
+    st.line_chart(chart_df, color=colors)
+
+
 st.set_page_config(page_title="52週来高値スクリーナー", layout="wide")
 
 st.title("📈 52週来高値スクリーナー(プロトタイプ)")
@@ -202,6 +223,88 @@ def load_precomputed_result() -> pd.DataFrame:
         return pd.DataFrame()
     return pd.read_csv(OUTPUT_FILE)
 
+
+st.subheader("🔍 個別銘柄を分析")
+st.caption("サイドバーでの選択に関わらず、全銘柄から検索して分析できます。")
+analysis_query = st.text_input("コードまたは銘柄名で検索", key="analysis_query", placeholder="例: 7203 / トヨタ")
+analysis_matches = []
+if analysis_query:
+    q = analysis_query.lower()
+    analysis_matches = [
+        t for t in master if q in t["code"].lower() or q in t["name"].lower()
+    ][:50]
+
+if analysis_query and not analysis_matches:
+    st.info("該当する銘柄が見つかりませんでした。")
+elif analysis_matches:
+    analysis_label = st.selectbox(
+        "候補から選択",
+        [f"{t['code']} - {t['name']}" for t in analysis_matches],
+        key="analysis_pick",
+    )
+    analysis_code = analysis_label.split(" - ", 1)[0]
+    analysis_name = master_by_code.get(analysis_code, "")
+
+    with st.spinner(f"{analysis_name}を分析中..."):
+        try:
+            single_result = run_screen((analysis_code,), as_of_date)
+        except Exception:
+            single_result = pd.DataFrame()
+        single_fallback = False
+        single_as_of = as_of_date
+        if (single_result is None or single_result.empty) and CLOUD_MODE:
+            full_result = load_precomputed_result()
+            if not full_result.empty:
+                single_fallback = True
+                single_as_of = full_result["date"].max()
+                single_result = full_result[full_result["code"] == analysis_code].reset_index(drop=True)
+
+    if single_result is None or single_result.empty:
+        st.warning(f"{analysis_name}({analysis_code})のデータを取得できませんでした。")
+    else:
+        row = single_result.iloc[0]
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("終値", f"{int(row['close']):,}円")
+        m2.metric("52週高値からの差分", f"{row['pct_vs_prior_high']:.2f}%")
+        m3.metric("本日52週高値更新", "✅" if row["new_52w_high"] else "❌")
+        if pd.notna(row.get("trading_days_since_high")):
+            m4.metric("最新更新からの営業日数", f"{int(row['trading_days_since_high'])}日")
+
+        if pd.notna(row.get("vol_tendency")):
+            st.info(
+                f"出来高傾向: {row['vol_tendency']} → 過去データで継続"
+                f"{row['tendency_continuation_rate']:.0f}%/反落{row['tendency_pullback_rate']:.0f}%"
+                f"(n={int(row['tendency_n'])}、個別銘柄の予測ではなく過去統計です)"
+            )
+
+        if single_fallback:
+            st.caption(
+                f"ライブ取得に失敗したため、ローカルPCの最終更新データ(基準日: {single_as_of})を表示しています。"
+            )
+
+        if st.checkbox("📑 増収増益を取得(EDINET DB)", key="analysis_fundamentals"):
+            fg_summary = None
+            try:
+                fg_summary = edinetdb.judge_growth(analysis_code.split(".")[0])
+            except edinetdb.QuotaExceededError as e:
+                st.warning(str(e))
+            except Exception as e:
+                st.warning(f"EDINET DB取得失敗: {e}")
+            if fg_summary:
+                fcol1, fcol2 = st.columns(2)
+                fcol1.metric("増収", "✅" if fg_summary.get("sales_growing") else "❌")
+                fcol2.metric("増益", "✅" if fg_summary.get("profit_growing") else "❌")
+
+        try:
+            analysis_hist = yf.Ticker(analysis_code).history(period="1y")
+        except Exception:
+            analysis_hist = pd.DataFrame()
+        if analysis_hist.empty:
+            st.caption("チャート用データの取得に失敗しました(yfinanceがブロックされている可能性があります)。")
+        else:
+            render_ma_chart(analysis_hist, row["prior_52w_high"], key_prefix="analysis")
+
+st.divider()
 
 if "result" not in st.session_state:
     st.session_state.result = None
@@ -376,24 +479,8 @@ if selected_code:
     if hist.empty:
         st.caption("チャート用データの取得に失敗しました(yfinanceがブロックされている可能性があります)。")
     else:
-        st.caption("移動平均線")
-        ma_all_windows = [25, 75, 200]
-        ma_default = {25: True, 75: True, 200: True}
-        ma_cols = st.columns([1] * len(ma_all_windows) + [8])
-        ma_windows = [
-            window
-            for window, col in zip(ma_all_windows, ma_cols)
-            if col.checkbox(f"{window}日", value=ma_default[window], key=f"ma_{window}")
-        ]
         prior_high = result.loc[result["code"] == selected_code, "prior_52w_high"].iloc[0]
-        chart_df = hist[["Close"]].rename(columns={"Close": "終値"})
-        colors = ["#e63946"]  # 終値を太く目立つ赤で強調
-        for window in ma_windows:
-            chart_df[f"{window}日移動平均"] = hist["Close"].rolling(window=window).mean()
-            colors.append("#a8a8a8")
-        chart_df["52週高値ライン"] = prior_high
-        colors.append("#457b9d")
-        st.line_chart(chart_df, color=colors)
+        render_ma_chart(hist, prior_high, key_prefix="bulk")
 
 if used_fallback:
     st.caption(f"データ基準日: {as_of_date}(ローカルPCの定期更新による、ライブ取得失敗時のフォールバック)")
