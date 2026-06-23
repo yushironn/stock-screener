@@ -123,11 +123,12 @@ def get_financials(sec_code: str) -> list[dict]:
     return data.get("data") or []
 
 
-def judge_growth(sec_code: str) -> dict | None:
+def judge_growth_from_records(records: list[dict], sec_code: str = "") -> dict | None:
     """
-    直近2期分の売上高・営業利益を比較し、増収・増益かどうかを判定する。
+    既に取得済みの財務時系列(get_financialsの戻り値)から、直近2期分の
+    売上高・営業利益を比較し、増収・増益かどうかを判定する。
+    (追加のAPI呼び出しを発生させたくない場合はこちらを使う)
     """
-    records = get_financials(sec_code)
     if len(records) < 2:
         return None
 
@@ -155,3 +156,13 @@ def judge_growth(sec_code: str) -> dict | None:
             latest_profit is not None and prior_profit is not None and latest_profit > prior_profit
         ),
     }
+
+
+def judge_growth(sec_code: str) -> dict | None:
+    """
+    直近2期分の売上高・営業利益を比較し、増収・増益かどうかを判定する。
+    (内部でget_financialsを呼ぶため、財務時系列を別途使う場合は
+    judge_growth_from_recordsを使ってAPI呼び出しを節約すること)
+    """
+    records = get_financials(sec_code)
+    return judge_growth_from_records(records, sec_code)

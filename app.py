@@ -282,18 +282,49 @@ elif analysis_matches:
                 f"ライブ取得に失敗したため、ローカルPCの最終更新データ(基準日: {single_as_of})を表示しています。"
             )
 
-        if st.checkbox("📑 増収増益を取得(EDINET DB)", key="analysis_fundamentals"):
-            fg_summary = None
+        if st.checkbox("📑 財務・業績分析を取得(EDINET DB)", key="analysis_fundamentals"):
+            fin_records = []
             try:
-                fg_summary = edinetdb.judge_growth(analysis_code.split(".")[0])
+                fin_records = edinetdb.get_financials(analysis_code.split(".")[0])
             except edinetdb.QuotaExceededError as e:
                 st.warning(str(e))
             except Exception as e:
                 st.warning(f"EDINET DB取得失敗: {e}")
+
+            fg_summary = edinetdb.judge_growth_from_records(fin_records)
             if fg_summary:
                 fcol1, fcol2 = st.columns(2)
                 fcol1.metric("増収", "✅" if fg_summary.get("sales_growing") else "❌")
                 fcol2.metric("増益", "✅" if fg_summary.get("profit_growing") else "❌")
+
+            if fin_records:
+                fin_df = pd.DataFrame(fin_records).dropna(subset=["fiscal_year"])
+                fin_df = fin_df.sort_values("fiscal_year").set_index("fiscal_year")
+
+                if "revenue" in fin_df.columns:
+                    st.caption("📊 売上高の推移(百万円)")
+                    st.bar_chart((fin_df["revenue"] / 1e6).rename("売上高"))
+
+                profit_cols = [c for c in ["operating_income", "ordinary_income", "net_income"] if c in fin_df.columns]
+                if profit_cols:
+                    st.caption("📊 利益の推移(百万円)")
+                    profit_df = (fin_df[profit_cols] / 1e6).rename(columns={
+                        "operating_income": "営業利益",
+                        "ordinary_income": "経常利益",
+                        "net_income": "純利益",
+                    })
+                    st.bar_chart(profit_df)
+
+                ratio_cols = [c for c in ["roe_official", "equity_ratio_official"] if c in fin_df.columns]
+                if ratio_cols:
+                    st.caption("📈 ROE・自己資本比率の推移(%)")
+                    ratio_df = (fin_df[ratio_cols] * 100).rename(columns={
+                        "roe_official": "ROE",
+                        "equity_ratio_official": "自己資本比率",
+                    })
+                    st.line_chart(ratio_df)
+            else:
+                st.caption("財務データが取得できませんでした。")
 
         try:
             analysis_hist = yf.Ticker(analysis_code).history(period="1y")
