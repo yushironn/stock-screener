@@ -543,11 +543,6 @@ if "analysis_query_override" in st.session_state:
     st.session_state["analysis_query"] = st.session_state.pop("analysis_query_override")
 
 st.title("📈 安全成長・急成長株スクリーナー")
-st.caption(
-    "yfinance(Yahoo Finance)の無料データを使い、基準日時点の高値が"
-    "その基準日より前の過去252営業日(52週)の最高値を更新しているかを判定します。"
-    "データは約15分遅延、対象はtickers.csvに記載した銘柄のみです。"
-)
 if CLOUD_MODE:
     st.caption(
         "クラウド版はyfinanceがブロックされることがあるため、まずライブ取得を試し、"
@@ -962,12 +957,6 @@ def render_fundamentals_picker(
 
 
 section_heading("🔍 銘柄スクリーニング")
-st.caption(
-    "キーワード・市場・時価総額・財務指標(PER・ROE・増収増益)・"
-    "品質・割安・成長(グロス・プロフィタビリティ・PBR・成長の質・複合スコア)を"
-    "組み合わせて条件検索できます(何も入力しなければ絞り込みなし、全銘柄が対象)。"
-    "条件を入力したら「🔍 スクリーニング実行」ボタンを押してください。"
-)
 
 sc1, sc2, sc3 = st.columns(3)
 screen_keyword = sc1.text_input(
