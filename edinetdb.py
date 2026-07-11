@@ -1,24 +1,25 @@
 """
-EDINET DB(edinetdb.jp)クライアント(プロトタイプ・未検証)
+EDINET DB(edinetdb.jp)クライアント
 
 EDINET DBは金融庁EDINETの有価証券報告書データを構造化して提供する
 第三者サービス(Cabocia Inc.運営、金融庁とは無関係)。
-公式EDINET APIと違い、財務数値(売上高・営業利益など)が既に整理された
-形で取得できるため、XBRL/CSVの自前パースが不要。
 
 利用には無料のAPIキーが必要(個人登録、Google/Microsoft/メールいずれか):
     https://edinetdb.jp/developers
 取得したキーは環境変数に設定して使う(コードや会話に直接書かない):
     PowerShell: $env:EDINETDB_API_KEY = "発行されたキー"
 
-参考にしたAPI仕様(公式ドキュメント https://edinetdb.jp/docs/api より):
+API仕様(公式ドキュメント https://edinetdb.jp/docs/api、実データで検証済み):
 - ベースURL: https://edinetdb.jp/v1
 - 認証: ヘッダー "X-API-Key: <キー>"
-- /companies/{code}/financials : 財務時系列(revenue, operating_income, net_income, eps)
+- /companies/{code}/financials : 財務時系列(会計年度ごとのレコードのリスト)。
+  主なフィールド: revenue(売上高), ordinary_income(経常利益), net_income(純利益),
+  eps/adjusted_eps, bps/adjusted_bps, per, dividend_per_share, payout_ratio,
+  roe_official, equity_ratio_official, total_assets, shareholders_equity,
+  shares_issued, fiscal_year など。
+  ※ operating_income(営業利益)は提供されない。
+  ※ adjusted_eps/adjusted_bpsは株式分割調整済みで複数年比較に向く。
 - 無料プランは100回/日まで
-
-注意: 実際のAPIキーでまだ動作確認していないため、レスポンスの実際の構造
-(日付の並び順や期間の表記など)は実データで調整が必要になる可能性がある。
 """
 
 import json
@@ -115,54 +116,11 @@ def get_financials(sec_code: str) -> list[dict]:
     """
     証券コード(4桁、例: "7203")の財務時系列を取得する。
     戻り値は会計年度(fiscal_year)ごとのレコードのリスト。
+    増収増益判定など派生指標の算出はanalysis.pyを使うこと
+    (operating_incomeはAPIで提供されないので、ordinary_income/net_incomeを使う)。
     """
     edinet_code = find_edinet_code(sec_code)
     if not edinet_code:
         return []
     data = _get(f"/companies/{edinet_code}/financials")
     return data.get("data") or []
-
-
-def judge_growth_from_records(records: list[dict], sec_code: str = "") -> dict | None:
-    """
-    既に取得済みの財務時系列(get_financialsの戻り値)から、直近2期分の
-    売上高・営業利益を比較し、増収・増益かどうかを判定する。
-    (追加のAPI呼び出しを発生させたくない場合はこちらを使う)
-    """
-    if len(records) < 2:
-        return None
-
-    # 期間の新しい順に並んでいるか分からないため、fiscal_yearでソートする
-    records = sorted(records, key=lambda r: r.get("fiscal_year") or 0, reverse=True)
-    latest, prior = records[0], records[1]
-
-    latest_revenue = latest.get("revenue")
-    prior_revenue = prior.get("revenue")
-    latest_profit = latest.get("operating_income")
-    prior_profit = prior.get("operating_income")
-
-    return {
-        "sec_code": sec_code,
-        "latest_period": latest.get("fiscal_year"),
-        "prior_period": prior.get("fiscal_year"),
-        "latest_revenue": latest_revenue,
-        "prior_revenue": prior_revenue,
-        "latest_operating_income": latest_profit,
-        "prior_operating_income": prior_profit,
-        "sales_growing": (
-            latest_revenue is not None and prior_revenue is not None and latest_revenue > prior_revenue
-        ),
-        "profit_growing": (
-            latest_profit is not None and prior_profit is not None and latest_profit > prior_profit
-        ),
-    }
-
-
-def judge_growth(sec_code: str) -> dict | None:
-    """
-    直近2期分の売上高・営業利益を比較し、増収・増益かどうかを判定する。
-    (内部でget_financialsを呼ぶため、財務時系列を別途使う場合は
-    judge_growth_from_recordsを使ってAPI呼び出しを節約すること)
-    """
-    records = get_financials(sec_code)
-    return judge_growth_from_records(records, sec_code)
