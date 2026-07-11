@@ -19,6 +19,10 @@ import quality_score
 import screener
 
 SHARES_OUTSTANDING_CACHE_FILE = Path(__file__).parent / "cache" / "shares_outstanding.json"
+# クラウド環境等、cache/quality/がまるごと無い(=ローカルキャッシュが空の)場合に使う
+# フォールバック。ローカルPCがdaily_refresh.pyでbuild_quality_table()の結果を
+# 定期生成・GitHubにpushしたスナップショット。
+QUALITY_TABLE_SNAPSHOT_FILE = Path(__file__).parent / "quality_table.csv"
 
 
 def load_master_frame(master: list[dict]) -> pd.DataFrame:
@@ -158,6 +162,10 @@ def build_quality_table(codes: list[str] | None = None) -> pd.DataFrame:
     """
     if codes is None:
         codes = [f"{c}.T" for c in quality_score.list_quality_cached_codes()]
+        if not codes and QUALITY_TABLE_SNAPSHOT_FILE.exists():
+            # ローカルの品質データキャッシュが無い(クラウド環境等)場合、
+            # ローカルPCが生成・pushしたスナップショットへフォールバックする。
+            return pd.read_csv(QUALITY_TABLE_SNAPSHOT_FILE)
 
     sector_map = _load_sector_map()
     shares_outstanding_cache = _load_shares_outstanding_cache()

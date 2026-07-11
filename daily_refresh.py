@@ -12,6 +12,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import finder
 from screener import OUTPUT_FILE, TICKERS_FILE, load_tickers, screen
 
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
@@ -19,6 +20,7 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
 
 REPO_DIR = Path(__file__).parent
 LOG_FILE = REPO_DIR / "refresh.log"
+QUALITY_TABLE_FILE = REPO_DIR / "quality_table.csv"
 
 
 def _log(message: str) -> None:
@@ -40,23 +42,23 @@ def _run_git(git_exe: str, *args: str) -> subprocess.CompletedProcess:
 
 def _push_result_to_github() -> None:
     """
-    result.csvをGitHubにpushし、クラウド版(Streamlit Community Cloud)が
-    最新の結果を読み込めるようにする。クラウド版はyfinanceを直接呼ばず、
-    このファイルを表示するだけの構成にしている。
+    result.csv・quality_table.csvをGitHubにpushし、クラウド版(Streamlit Community Cloud)が
+    最新の結果を読み込めるようにする。クラウド版はyfinance/EDINETを直接呼ばず、
+    このファイル群を表示するだけの構成にしている。
     """
     git_exe = shutil.which("git")
     if not git_exe:
         _log("gitが見つからないため、GitHubへのpushをスキップしました。")
         return
 
-    status = _run_git(git_exe, "status", "--porcelain", "result.csv")
+    status = _run_git(git_exe, "status", "--porcelain", "result.csv", "quality_table.csv")
     if not status.stdout.strip():
-        _log("result.csvに変更なし。pushはスキップ。")
+        _log("result.csv・quality_table.csvに変更なし。pushはスキップ。")
         return
 
-    _run_git(git_exe, "add", "result.csv")
+    _run_git(git_exe, "add", "result.csv", "quality_table.csv")
     commit = _run_git(
-        git_exe, "commit", "-m", f"Update result.csv ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
+        git_exe, "commit", "-m", f"Update result.csv/quality_table.csv ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
     )
     if commit.returncode != 0:
         _log(f"git commit失敗: {commit.stderr.strip()}")
@@ -66,7 +68,7 @@ def _push_result_to_github() -> None:
     if push.returncode != 0:
         _log(f"git push失敗: {push.stderr.strip()}")
     else:
-        _log("result.csvをGitHubにpushしました。")
+        _log("result.csv・quality_table.csvをGitHubにpushしました。")
 
 
 def main() -> None:
@@ -78,6 +80,11 @@ def main() -> None:
         result.to_csv(OUTPUT_FILE, index=False, encoding="utf-8-sig")
         new_highs = int(result["new_52w_high"].sum()) if not result.empty else 0
         _log(f"取得成功: {len(result)}/{len(tickers)}銘柄、本日の新高値: {new_highs}件")
+
+        quality_table = finder.build_quality_table()
+        quality_table.to_csv(QUALITY_TABLE_FILE, index=False, encoding="utf-8-sig")
+        _log(f"品質データテーブルを更新: {len(quality_table)}銘柄")
+
         _push_result_to_github()
     except Exception as e:
         _log(f"エラー: {type(e).__name__}: {e}")

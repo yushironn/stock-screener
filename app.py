@@ -719,6 +719,11 @@ def load_quality_table_cached() -> pd.DataFrame:
     PER・ROE・増収増益・GP・成長の質・複合スコア・PBRをまとめて読み込む。
     ディスクを毎回スキャンしないよう1時間キャッシュする(バックフィルを再実行した直後に
     最新化したい場合は、アプリを再起動するかキャッシュのTTL切れを待つ)。
+
+    クラウド環境ではcache/quality/自体をGitHubに含めていない(件数が多すぎるため)ため、
+    finder.build_quality_table()側でローカルキャッシュが空の場合にquality_table.csv
+    (ローカルPCがdaily_refresh.pyで定期生成・pushしたスナップショット)へ自動的に
+    フォールバックする。
     """
     return finder.build_quality_table()
 
@@ -975,7 +980,7 @@ screen_market_caps = sc3.multiselect(
     help="品質データキャッシュ(発行済株式数×直近終値)から算出。未キャッシュの銘柄は対象外になります。",
 )
 
-quality_cached_count = len(quality_score.list_quality_cached_codes())
+quality_cached_count = len(load_quality_table_cached())
 if quality_cached_count == 0:
     st.info(
         "品質スコア用データがまだキャッシュされていません。"
