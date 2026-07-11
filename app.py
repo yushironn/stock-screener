@@ -958,257 +958,258 @@ def render_fundamentals_picker(
 
 section_heading("🔍 銘柄スクリーニング")
 
-sc1, sc2, sc3 = st.columns(3)
-screen_keyword = sc1.text_input(
-    "キーワード(銘柄名・業種)", key="screen_keyword", placeholder="例: 半導体 / 銀行 / 食品"
-)
-market_options = sorted({t["market"] for t in master if t.get("market")})
-screen_markets = sc2.multiselect("市場", market_options, key="screen_markets")
-screen_market_caps = sc3.multiselect(
-    "時価総額", finder.MARKET_CAP_BUCKET_LABELS, key="screen_market_caps",
-    help="品質データキャッシュ(発行済株式数×直近終値)から算出。未キャッシュの銘柄は対象外になります。",
-)
-
-quality_cached_count = len(load_quality_table_cached())
-if quality_cached_count == 0:
-    st.info(
-        "品質スコア用データがまだキャッシュされていません。"
-        "先にターミナルで `python backfill_quality_universe.py` を実行してください"
-        "(公式EDINET APIで全銘柄分を取得します。数時間規模の処理です)。"
+with st.expander("🔍 フィルタ条件を開く/閉じる", expanded=False):
+    sc1, sc2, sc3 = st.columns(3)
+    screen_keyword = sc1.text_input(
+        "キーワード(銘柄名・業種)", key="screen_keyword", placeholder="例: 半導体 / 銀行 / 食品"
+    )
+    market_options = sorted({t["market"] for t in master if t.get("market")})
+    screen_markets = sc2.multiselect("市場", market_options, key="screen_markets")
+    screen_market_caps = sc3.multiselect(
+        "時価総額", finder.MARKET_CAP_BUCKET_LABELS, key="screen_market_caps",
+        help="品質データキャッシュ(発行済株式数×直近終値)から算出。未キャッシュの銘柄は対象外になります。",
     )
 
-st.caption(f"📑 財務指標(PER・ROE・増収増益。財務データキャッシュ済み: {quality_cached_count}銘柄が対象)")
-ff1, ff2, ff3 = st.columns(3)
-per_input = ff1.number_input(
-    "PER以下", min_value=0.0, value=0.0, step=1.0, key="screen_max_per",
-    help="株価収益率。株価÷EPS(1株利益)。決算期末時点の値(EDINET API v2の5年サマリー表より、"
-    "現在株価ベースではない)。低いほど割安とされるが業種により目安が異なる。"
-    "0を指定すると絞り込みなし",
-)
-roe_input = ff2.number_input(
-    "ROE(%) 以上", min_value=0.0, value=0.0, step=1.0, key="screen_min_roe",
-    help="自己資本利益率。純利益÷自己資本(株主資本)。高いほど資本効率が良いとされる"
-    "(品質データキャッシュより)。0を指定すると絞り込みなし",
-)
-screen_max_per = per_input or None
-screen_min_roe = roe_input or None
-screen_min_growth_streak = int(
-    ff3.number_input(
-        "増収増益 ◯期以上連続", min_value=0, value=1, step=1, key="screen_min_growth_streak",
-        help="増収(売上高が前年比プラス)・増益(純利益が前年比プラス)の両方が指定期数以上"
-        "連続している銘柄に絞り込む",
-    )
-)
-screen_min_rev_streak = screen_min_profit_streak = screen_min_growth_streak
-
-st.caption(f"💎 品質・割安・成長(GP・PBR・成長の質・複合スコア。品質データキャッシュ済み: {quality_cached_count}銘柄が対象)")
-qf1, qf2, qf3, qf4 = st.columns(4)
-q_min_composite_raw = qf1.slider(
-    "複合スコア 以上", min_value=0, max_value=100, value=0, step=5, key="screen_min_composite",
-)
-screen_min_composite = q_min_composite_raw or None
-q_min_gp_raw = qf2.number_input(
-    "GP(%) 以上", min_value=0.0, value=0.0, step=1.0, key="screen_min_gp",
-    help="GP(グロス・プロフィタビリティ)：資産をどれだけ効率よく使って粗利益を稼げているかを"
-    "示す指標。中央値は約26%。30%超えで平均並み以上、40%超えで上位25%程度、"
-    "60%超えで上位10%程度の水準。",
-)
-screen_min_gp = q_min_gp_raw or None
-q_max_pbr_raw = qf3.number_input(
-    "PBR以下", min_value=0.0, value=20.0, step=0.1, key="screen_max_pbr",
-    help="0を指定すると絞り込みなし。価格キャッシュが無い銘柄はPBR未計算のため対象外になります。",
-)
-screen_max_pbr = q_max_pbr_raw or None
-q_min_growth_raw = qf4.number_input(
-    "成長の質(総資産比%) 以上", min_value=-100.0, value=0.0, step=1.0, key="screen_min_growth",
-    help="成長の質：(配当・自己株買い・借入返済等の支出 − 増資・新規借入等の収入)÷総資産。"
-    "プラスが大きいほど、増資や借入に頼らず自己資金(営業キャッシュフロー)で株主還元しながら"
-    "成長できていることを示す。中央値は約+1.9%。0%超え(プラス)であれば自己資金型の成長・"
-    "還元ができている水準、+3%超えで上位25%程度、+6%超えで上位10%程度の水準。マイナスは"
-    "増資・借入への依存度が高いことを示す。",
-)
-screen_min_growth = q_min_growth_raw if q_min_growth_raw > -100.0 else None
-
-if st.button("🔍 スクリーニング実行", key="screen_run_button", type="primary"):
-    st.session_state["screen_candidates"] = finder.filter_combined(
-        master,
-        keyword=screen_keyword,
-        markets=screen_markets,
-        market_cap_buckets=screen_market_caps,
-        max_per=screen_max_per,
-        min_roe_pct=screen_min_roe,
-        min_revenue_streak=screen_min_rev_streak,
-        min_profit_streak=screen_min_profit_streak,
-        min_composite_score=screen_min_composite,
-        min_gross_profitability_pct=screen_min_gp,
-        max_pbr=screen_max_pbr,
-        min_growth_quality_pct=screen_min_growth,
-    )
-
-screen_candidates = st.session_state.get("screen_candidates")
-
-if screen_candidates is None:
-    st.caption("条件を入力して「🔍 スクリーニング実行」ボタンを押してください。")
-elif screen_candidates.empty:
-    st.caption(f"該当: {len(screen_candidates)}件")
-    st.info("該当する銘柄がありません。財務・品質条件を使っている場合、キャッシュ済み銘柄の中に該当がない可能性があります。")
-else:
-    st.caption(f"該当: {len(screen_candidates)}件")
-    s_display = screen_candidates.copy()
-    rename_map = {
-        "code": "コード", "name": "銘柄名", "market": "市場", "sector33": "業種",
-        "latest_per": "PER",
-    }
-    if "market" in s_display.columns:
-        s_display["market"] = s_display["market"].map(abbreviate_market)
-    if "latest_roe_official" in s_display.columns:
-        s_display["ROE(%)"] = (s_display["latest_roe_official"] * 100).round(2)
-    if "revenue_streak" in s_display.columns and "net_income_streak" in s_display.columns:
-        s_display["増収増益"] = _combined_growth_streak(
-            s_display["revenue_streak"], s_display["net_income_streak"]
+    quality_cached_count = len(load_quality_table_cached())
+    if quality_cached_count == 0:
+        st.info(
+            "品質スコア用データがまだキャッシュされていません。"
+            "先にターミナルで `python backfill_quality_universe.py` を実行してください"
+            "(公式EDINET APIで全銘柄分を取得します。数時間規模の処理です)。"
         )
-    if "gross_profitability" in s_display.columns:
-        s_display["GP(%)"] = _format_quality_value(s_display["gross_profitability"] * 100)
-    if "growth_quality_raw" in s_display.columns:
-        s_display["成長の質(%)"] = _format_quality_value(s_display["growth_quality_raw"] * 100)
-    if "composite_score" in s_display.columns:
-        s_display["複合スコア"] = _format_composite_score(
-            s_display["composite_score"], s_display.get("composite_score_low_sample")
+
+    st.caption(f"📑 財務指標(PER・ROE・増収増益。財務データキャッシュ済み: {quality_cached_count}銘柄が対象)")
+    ff1, ff2, ff3 = st.columns(3)
+    per_input = ff1.number_input(
+        "PER以下", min_value=0.0, value=0.0, step=1.0, key="screen_max_per",
+        help="株価収益率。株価÷EPS(1株利益)。決算期末時点の値(EDINET API v2の5年サマリー表より、"
+        "現在株価ベースではない)。低いほど割安とされるが業種により目安が異なる。"
+        "0を指定すると絞り込みなし",
+    )
+    roe_input = ff2.number_input(
+        "ROE(%) 以上", min_value=0.0, value=0.0, step=1.0, key="screen_min_roe",
+        help="自己資本利益率。純利益÷自己資本(株主資本)。高いほど資本効率が良いとされる"
+        "(品質データキャッシュより)。0を指定すると絞り込みなし",
+    )
+    screen_max_per = per_input or None
+    screen_min_roe = roe_input or None
+    screen_min_growth_streak = int(
+        ff3.number_input(
+            "増収増益 ◯期以上連続", min_value=0, value=1, step=1, key="screen_min_growth_streak",
+            help="増収(売上高が前年比プラス)・増益(純利益が前年比プラス)の両方が指定期数以上"
+            "連続している銘柄に絞り込む",
         )
-    if "live_pbr" in s_display.columns:
-        s_display["PBR"] = _format_pbr(s_display["live_pbr"], missing_label=QUALITY_INDETERMINATE_LABEL)
-    if "market_cap_bucket" in s_display.columns:
-        s_display["時価総額"] = s_display["market_cap_bucket"]
-    display_cols = [
-        c for c in [
-            "code", "name", "market", "sector33", "時価総額",
-            "latest_per", "ROE(%)", "増収増益",
-            "GP(%)", "PBR", "成長の質(%)", "複合スコア",
+    )
+    screen_min_rev_streak = screen_min_profit_streak = screen_min_growth_streak
+
+    st.caption(f"💎 品質・割安・成長(GP・PBR・成長の質・複合スコア。品質データキャッシュ済み: {quality_cached_count}銘柄が対象)")
+    qf1, qf2, qf3, qf4 = st.columns(4)
+    q_min_composite_raw = qf1.slider(
+        "複合スコア 以上", min_value=0, max_value=100, value=0, step=5, key="screen_min_composite",
+    )
+    screen_min_composite = q_min_composite_raw or None
+    q_min_gp_raw = qf2.number_input(
+        "GP(%) 以上", min_value=0.0, value=0.0, step=1.0, key="screen_min_gp",
+        help="GP(グロス・プロフィタビリティ)：資産をどれだけ効率よく使って粗利益を稼げているかを"
+        "示す指標。中央値は約26%。30%超えで平均並み以上、40%超えで上位25%程度、"
+        "60%超えで上位10%程度の水準。",
+    )
+    screen_min_gp = q_min_gp_raw or None
+    q_max_pbr_raw = qf3.number_input(
+        "PBR以下", min_value=0.0, value=20.0, step=0.1, key="screen_max_pbr",
+        help="0を指定すると絞り込みなし。価格キャッシュが無い銘柄はPBR未計算のため対象外になります。",
+    )
+    screen_max_pbr = q_max_pbr_raw or None
+    q_min_growth_raw = qf4.number_input(
+        "成長の質(総資産比%) 以上", min_value=-100.0, value=0.0, step=1.0, key="screen_min_growth",
+        help="成長の質：(配当・自己株買い・借入返済等の支出 − 増資・新規借入等の収入)÷総資産。"
+        "プラスが大きいほど、増資や借入に頼らず自己資金(営業キャッシュフロー)で株主還元しながら"
+        "成長できていることを示す。中央値は約+1.9%。0%超え(プラス)であれば自己資金型の成長・"
+        "還元ができている水準、+3%超えで上位25%程度、+6%超えで上位10%程度の水準。マイナスは"
+        "増資・借入への依存度が高いことを示す。",
+    )
+    screen_min_growth = q_min_growth_raw if q_min_growth_raw > -100.0 else None
+
+    if st.button("🔍 スクリーニング実行", key="screen_run_button", type="primary"):
+        st.session_state["screen_candidates"] = finder.filter_combined(
+            master,
+            keyword=screen_keyword,
+            markets=screen_markets,
+            market_cap_buckets=screen_market_caps,
+            max_per=screen_max_per,
+            min_roe_pct=screen_min_roe,
+            min_revenue_streak=screen_min_rev_streak,
+            min_profit_streak=screen_min_profit_streak,
+            min_composite_score=screen_min_composite,
+            min_gross_profitability_pct=screen_min_gp,
+            max_pbr=screen_max_pbr,
+            min_growth_quality_pct=screen_min_growth,
+        )
+
+    screen_candidates = st.session_state.get("screen_candidates")
+
+    if screen_candidates is None:
+        st.caption("条件を入力して「🔍 スクリーニング実行」ボタンを押してください。")
+    elif screen_candidates.empty:
+        st.caption(f"該当: {len(screen_candidates)}件")
+        st.info("該当する銘柄がありません。財務・品質条件を使っている場合、キャッシュ済み銘柄の中に該当がない可能性があります。")
+    else:
+        st.caption(f"該当: {len(screen_candidates)}件")
+        s_display = screen_candidates.copy()
+        rename_map = {
+            "code": "コード", "name": "銘柄名", "market": "市場", "sector33": "業種",
+            "latest_per": "PER",
+        }
+        if "market" in s_display.columns:
+            s_display["market"] = s_display["market"].map(abbreviate_market)
+        if "latest_roe_official" in s_display.columns:
+            s_display["ROE(%)"] = (s_display["latest_roe_official"] * 100).round(2)
+        if "revenue_streak" in s_display.columns and "net_income_streak" in s_display.columns:
+            s_display["増収増益"] = _combined_growth_streak(
+                s_display["revenue_streak"], s_display["net_income_streak"]
+            )
+        if "gross_profitability" in s_display.columns:
+            s_display["GP(%)"] = _format_quality_value(s_display["gross_profitability"] * 100)
+        if "growth_quality_raw" in s_display.columns:
+            s_display["成長の質(%)"] = _format_quality_value(s_display["growth_quality_raw"] * 100)
+        if "composite_score" in s_display.columns:
+            s_display["複合スコア"] = _format_composite_score(
+                s_display["composite_score"], s_display.get("composite_score_low_sample")
+            )
+        if "live_pbr" in s_display.columns:
+            s_display["PBR"] = _format_pbr(s_display["live_pbr"], missing_label=QUALITY_INDETERMINATE_LABEL)
+        if "market_cap_bucket" in s_display.columns:
+            s_display["時価総額"] = s_display["market_cap_bucket"]
+        display_cols = [
+            c for c in [
+                "code", "name", "market", "sector33", "時価総額",
+                "latest_per", "ROE(%)", "増収増益",
+                "GP(%)", "PBR", "成長の質(%)", "複合スコア",
+            ]
+            if c in s_display.columns
         ]
-        if c in s_display.columns
-    ]
-    screen_display = s_display[display_cols].rename(columns=rename_map)
-    screen_display["コード"] = code_links(s_display["code"].tolist())
-    screen_event = st.dataframe(
-        screen_display,
-        width="stretch",
-        hide_index=True,
-        on_select="rerun",
-        selection_mode="single-row",
-        column_config={
-            **number_column_config(screen_display.columns),
-            **quality_text_column_config(screen_display.columns),
-            **code_link_column_config(),
-        },
-        key="screen_table",
-    )
-    screen_rows = screen_event.selection["rows"]
-    if screen_rows:
-        screen_selected_code = s_display["code"].iloc[screen_rows[0]]
-        screen_selected_name = s_display["name"].iloc[screen_rows[0]]
-        if st.button(f"🔍 {screen_selected_name}を「個別銘柄を分析」で開く", key="screen_open_analysis"):
-            st.session_state["analysis_query_override"] = screen_selected_code.split(".")[0]
-            st.session_state["analysis_ready"] = True
-            st.rerun()
-
-    # ── 決算サプライズ一括取得 ──────────────────────────────
-    with st.expander("📈 決算サプライズ分析(候補銘柄一覧)", expanded=False):
-        st.caption(
-            "候補銘柄のEPSサプライズ履歴(対コンセンサス)を取得します。"
-            "銘柄数が多いと取得に時間がかかります(1銘柄あたり約2〜3秒)。"
+        screen_display = s_display[display_cols].rename(columns=rename_map)
+        screen_display["コード"] = code_links(s_display["code"].tolist())
+        screen_event = st.dataframe(
+            screen_display,
+            width="stretch",
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            column_config={
+                **number_column_config(screen_display.columns),
+                **quality_text_column_config(screen_display.columns),
+                **code_link_column_config(),
+            },
+            key="screen_table",
         )
-        max_fetch = st.slider("取得上限銘柄数", 5, 50, 20, key="screen_surprise_max")
-        if st.button("📥 サプライズデータを取得", key="screen_surprise_fetch"):
-            codes = screen_candidates["code"].tolist()[:max_fetch]
-            prog = st.progress(0, text="取得中...")
-            rows_surp = []
-            for i, code in enumerate(codes):
-                try:
-                    d = earnings_surprise.get_surprise_data(code)
-                    rows_surp.append({
-                        "コード":          code,
-                        "最新サプライズ%":  d.get("consensus_latest"),
-                        "過去平均%":        d.get("consensus_avg_pct"),
-                        "上振れトレンド":   d.get("consensus_trend", "─"),
-                        "来期予想EPS":      d.get("next_forecast_eps"),
-                    })
-                except Exception:
-                    rows_surp.append({"コード": code, "最新サプライズ%": None,
-                                      "過去平均%": None, "上振れトレンド": "エラー",
-                                      "来期予想EPS": None})
-                prog.progress((i + 1) / len(codes), text=f"{code} 取得中... ({i+1}/{len(codes)})")
-            prog.empty()
-            st.session_state["screen_surprise_df"] = pd.DataFrame(rows_surp)
+        screen_rows = screen_event.selection["rows"]
+        if screen_rows:
+            screen_selected_code = s_display["code"].iloc[screen_rows[0]]
+            screen_selected_name = s_display["name"].iloc[screen_rows[0]]
+            if st.button(f"🔍 {screen_selected_name}を「個別銘柄を分析」で開く", key="screen_open_analysis"):
+                st.session_state["analysis_query_override"] = screen_selected_code.split(".")[0]
+                st.session_state["analysis_ready"] = True
+                st.rerun()
 
-        if "screen_surprise_df" in st.session_state and not st.session_state["screen_surprise_df"].empty:
-            surp_df = st.session_state["screen_surprise_df"]
-
-            def _trend_icon(t: str) -> str:
-                return {"加速": "◎ 加速", "横ばい": "△ 横ばい", "減速": "▽ 減速"}.get(t, t)
-            surp_df["上振れトレンド"] = surp_df["上振れトレンド"].apply(_trend_icon)
-
-            st.dataframe(
-                surp_df,
-                hide_index=True,
-                column_config={
-                    "最新サプライズ%":  st.column_config.NumberColumn(format="%.1f%%"),
-                    "過去平均%":        st.column_config.NumberColumn(format="%.1f%%"),
-                    "来期予想EPS":      st.column_config.NumberColumn(format="%.1f"),
-                },
-            )
+        # ── 決算サプライズ一括取得 ──────────────────────────────
+        with st.expander("📈 決算サプライズ分析(候補銘柄一覧)", expanded=False):
             st.caption(
-                "最新サプライズ% / 過去平均%：対コンセンサス(yfinance)。"
-                "◎加速 = 今回が過去平均を+3pt以上上回る。"
-                "来期予想EPS：株探の会社予想値。"
+                "候補銘柄のEPSサプライズ履歴(対コンセンサス)を取得します。"
+                "銘柄数が多いと取得に時間がかかります(1銘柄あたり約2〜3秒)。"
             )
+            max_fetch = st.slider("取得上限銘柄数", 5, 50, 20, key="screen_surprise_max")
+            if st.button("📥 サプライズデータを取得", key="screen_surprise_fetch"):
+                codes = screen_candidates["code"].tolist()[:max_fetch]
+                prog = st.progress(0, text="取得中...")
+                rows_surp = []
+                for i, code in enumerate(codes):
+                    try:
+                        d = earnings_surprise.get_surprise_data(code)
+                        rows_surp.append({
+                            "コード":          code,
+                            "最新サプライズ%":  d.get("consensus_latest"),
+                            "過去平均%":        d.get("consensus_avg_pct"),
+                            "上振れトレンド":   d.get("consensus_trend", "─"),
+                            "来期予想EPS":      d.get("next_forecast_eps"),
+                        })
+                    except Exception:
+                        rows_surp.append({"コード": code, "最新サプライズ%": None,
+                                          "過去平均%": None, "上振れトレンド": "エラー",
+                                          "来期予想EPS": None})
+                    prog.progress((i + 1) / len(codes), text=f"{code} 取得中... ({i+1}/{len(codes)})")
+                prog.empty()
+                st.session_state["screen_surprise_df"] = pd.DataFrame(rows_surp)
 
-    if "market_cap_bucket" in screen_candidates.columns:
-        st.caption(
-            "時価総額：品質データキャッシュの発行済株式数(自己株式控除後)×直近終値で計算。"
-            "500億円以下/500億〜2000億円/2000億〜5000億円/5000億円超、の4区分。"
-            "品質データが無い銘柄は空欄になります。"
-        )
+            if "screen_surprise_df" in st.session_state and not st.session_state["screen_surprise_df"].empty:
+                surp_df = st.session_state["screen_surprise_df"]
 
-    if "gross_profitability" in screen_candidates.columns or "growth_quality_raw" in screen_candidates.columns:
-        st.caption(
-            "GP(グロス・プロフィタビリティ)：資産をどれだけ効率よく使って粗利益を稼げているかを"
-            "示す指標。中央値は約26%。30%超えで平均並み以上、40%超えで上位25%程度、"
-            "60%超えで上位10%程度の水準。"
-        )
-        st.caption(
-            "成長の質：(配当・自己株買い・借入返済等の支出 − 増資・新規借入等の収入)÷総資産。"
-            "プラスが大きいほど、増資や借入に頼らず自己資金(営業キャッシュフロー)で株主還元しながら"
-            "成長できていることを示す。中央値は約+1.9%。0%超え(プラス)であれば自己資金型の成長・"
-            "還元ができている水準、+3%超えで上位25%程度、+6%超えで上位10%程度の水準。マイナスは"
-            "増資・借入への依存度が高いことを示す。"
-        )
-        st.caption(
-            "上記の目安は、この一覧の元になっている品質データキャッシュの現時点の"
-            "分布から算出した参考値であり、固定の合格ラインではありません。"
-            "バックフィルが進む(全銘柄のデータが揃う)につれて数値は変動します。"
-        )
+                def _trend_icon(t: str) -> str:
+                    return {"加速": "◎ 加速", "横ばい": "△ 横ばい", "減速": "▽ 減速"}.get(t, t)
+                surp_df["上振れトレンド"] = surp_df["上振れトレンド"].apply(_trend_icon)
 
-        with st.expander("📊 業種別のグロス・プロフィタビリティ水準(中央値)", expanded=False):
-            st.caption(
-                "業種(33業種区分)による資産集約度の違いが大きいため、絶対水準ではなく"
-                "同業種内での相対比較の参考にしてください。品質データキャッシュ済みの"
-                "全銘柄(現在のキーワード等の絞り込みには依存しません)を対象に算出しています。"
-            )
-            industry_table = finder.build_quality_table()
-            if industry_table.empty:
-                st.caption("業種別集計に使えるデータがまだありません。")
-            else:
-                sector_stats = (
-                    industry_table.dropna(subset=["gross_profitability", "sector33"])
-                    .groupby("sector33")["gross_profitability"]
-                    .agg(median="median", count="count")
-                    .sort_values("median", ascending=False)
+                st.dataframe(
+                    surp_df,
+                    hide_index=True,
+                    column_config={
+                        "最新サプライズ%":  st.column_config.NumberColumn(format="%.1f%%"),
+                        "過去平均%":        st.column_config.NumberColumn(format="%.1f%%"),
+                        "来期予想EPS":      st.column_config.NumberColumn(format="%.1f"),
+                    },
                 )
-                sector_stats["グロス・プロフィタビリティ 中央値(%)"] = (sector_stats["median"] * 100).round(1)
-                sector_stats["銘柄数"] = sector_stats["count"].astype(int)
-                sector_display = sector_stats[["グロス・プロフィタビリティ 中央値(%)", "銘柄数"]].reset_index()
-                sector_display = sector_display.rename(columns={"sector33": "業種(33業種区分)"})
-                st.dataframe(sector_display, width="stretch", hide_index=True)
+                st.caption(
+                    "最新サプライズ% / 過去平均%：対コンセンサス(yfinance)。"
+                    "◎加速 = 今回が過去平均を+3pt以上上回る。"
+                    "来期予想EPS：株探の会社予想値。"
+                )
+
+        if "market_cap_bucket" in screen_candidates.columns:
+            st.caption(
+                "時価総額：品質データキャッシュの発行済株式数(自己株式控除後)×直近終値で計算。"
+                "500億円以下/500億〜2000億円/2000億〜5000億円/5000億円超、の4区分。"
+                "品質データが無い銘柄は空欄になります。"
+            )
+
+        if "gross_profitability" in screen_candidates.columns or "growth_quality_raw" in screen_candidates.columns:
+            st.caption(
+                "GP(グロス・プロフィタビリティ)：資産をどれだけ効率よく使って粗利益を稼げているかを"
+                "示す指標。中央値は約26%。30%超えで平均並み以上、40%超えで上位25%程度、"
+                "60%超えで上位10%程度の水準。"
+            )
+            st.caption(
+                "成長の質：(配当・自己株買い・借入返済等の支出 − 増資・新規借入等の収入)÷総資産。"
+                "プラスが大きいほど、増資や借入に頼らず自己資金(営業キャッシュフロー)で株主還元しながら"
+                "成長できていることを示す。中央値は約+1.9%。0%超え(プラス)であれば自己資金型の成長・"
+                "還元ができている水準、+3%超えで上位25%程度、+6%超えで上位10%程度の水準。マイナスは"
+                "増資・借入への依存度が高いことを示す。"
+            )
+            st.caption(
+                "上記の目安は、この一覧の元になっている品質データキャッシュの現時点の"
+                "分布から算出した参考値であり、固定の合格ラインではありません。"
+                "バックフィルが進む(全銘柄のデータが揃う)につれて数値は変動します。"
+            )
+
+            with st.expander("📊 業種別のグロス・プロフィタビリティ水準(中央値)", expanded=False):
+                st.caption(
+                    "業種(33業種区分)による資産集約度の違いが大きいため、絶対水準ではなく"
+                    "同業種内での相対比較の参考にしてください。品質データキャッシュ済みの"
+                    "全銘柄(現在のキーワード等の絞り込みには依存しません)を対象に算出しています。"
+                )
+                industry_table = finder.build_quality_table()
+                if industry_table.empty:
+                    st.caption("業種別集計に使えるデータがまだありません。")
+                else:
+                    sector_stats = (
+                        industry_table.dropna(subset=["gross_profitability", "sector33"])
+                        .groupby("sector33")["gross_profitability"]
+                        .agg(median="median", count="count")
+                        .sort_values("median", ascending=False)
+                    )
+                    sector_stats["グロス・プロフィタビリティ 中央値(%)"] = (sector_stats["median"] * 100).round(1)
+                    sector_stats["銘柄数"] = sector_stats["count"].astype(int)
+                    sector_display = sector_stats[["グロス・プロフィタビリティ 中央値(%)", "銘柄数"]].reset_index()
+                    sector_display = sector_display.rename(columns={"sector33": "業種(33業種区分)"})
+                    st.dataframe(sector_display, width="stretch", hide_index=True)
 
 st.divider()
 
