@@ -51,6 +51,7 @@ GOLDEN_CROSS_IMMINENT_GAP_THRESHOLD = -0.03  # 乖離率(25日線-75日線)÷株
 # (backtest_dcr_imminent_failure.py)、この「不発」パターンはその後の株価がはっきり悪化する
 # 傾向を年別に見ても確認済みのため、単に非表示にするのではなく「乖離中」として明示する。
 GOLDEN_CROSS_DIVERGE_LOOKBACK = 30
+GOLDEN_CROSS_CONFIRM_DAYS = 5  # 「発生」後、この営業日数後の値動きで上昇中/下降中を判定する
 
 # 「クイックリカバリー型」判定用: 直近のゴールデンクロスの前に、この営業日数以内で
 # デッドクロス(25日線が75日線を下から上ではなく上から下に抜ける)があったかを見る。
@@ -213,10 +214,23 @@ def _golden_cross_status(close: pd.Series) -> dict | None:
                     # 早復型かどうかに関わらず、直前のデッドクロス日は分かる限り表示する
                     # (通常型も、単に早期復帰の期間より前にデッドクロスがあっただけ)
                     dead_cross_date = gap.index[dead_before[-1]]
+                cross_date = gap.index[last_cross_pos]
+                cross_price = float(close.loc[cross_date])
+                # 発生から5営業日後の株価で「上昇中/下降中」を判定する(まだ5営業日
+                # 経っていなければNone=判定不能。「発生」時点そのものではなく少し先の
+                # 値動きで見るのは、当日だけのブレに引っ張られないようにするため)。
+                pct_after_confirm = None
+                cross_pos_in_close = close.index.get_indexer([cross_date])[0]
+                confirm_pos = cross_pos_in_close + GOLDEN_CROSS_CONFIRM_DAYS
+                if confirm_pos < len(close) and cross_price:
+                    price_after_confirm = float(close.iloc[confirm_pos])
+                    pct_after_confirm = (price_after_confirm / cross_price - 1) * 100
                 return {
                     "status": "crossed", "days_since": int(days_since),
                     "is_quick_recovery": is_quick_recovery,
-                    "cross_date": gap.index[last_cross_pos],
+                    "cross_date": cross_date,
+                    "cross_price": cross_price,
+                    "pct_after_confirm": pct_after_confirm,
                     "dead_cross_date": dead_cross_date,
                 }
         return None
@@ -568,6 +582,14 @@ def screen(tickers: list[dict], as_of: str | date | None = None) -> pd.DataFrame
                 "golden_cross_peak_gap_pct": (
                     round(golden_cross["peak_gap_pct"], 2)
                     if golden_cross and golden_cross["status"] == "diverging"
+                    else None
+                ),
+                # 発生からGOLDEN_CROSS_CONFIRM_DAYS営業日後の値動き(「上昇中/下降中」表示の
+                # 判定に使う)。まだその日数分経っていなければNone。
+                "golden_cross_pct_after_confirm": (
+                    round(golden_cross["pct_after_confirm"], 2)
+                    if golden_cross and golden_cross["status"] == "crossed"
+                    and golden_cross.get("pct_after_confirm") is not None
                     else None
                 ),
                 "golden_cross_is_quick_recovery": (

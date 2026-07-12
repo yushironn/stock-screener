@@ -2019,11 +2019,21 @@ with st.expander("条件・用語の説明", expanded=False):
         "まだそこまで育っていない、これから上昇が始まるかもしれない銘柄を早めに拾う用途。"
     )
     st.caption(
+        "状態の流れ: 「接近中」→ 実際に交差すれば「発生」(さらにその後の値動きに応じて"
+        "📈上昇中/📉下降中を追記)、交差しないまま乖離が広がれば「乖離中」。"
+    )
+    st.caption(
         "「乖離中」: 直近30営業日以内に一度「接近中」の水準まで縮まったのに、交差しないまま"
         "再び乖離が広がり始めている状態(接近が不発に終わりつつある)。バックテストの結果、"
         "この「不発」パターンはその後の株価が明確に悪化する傾向を年別に見ても確認済み"
         "(勝率が転換成功時と比べて18〜36ポイント低い。backtest_dcr_imminent_failure.py参照)。"
         "単に見えなくするのではなく、警戒シグナルとして明示している。"
+    )
+    st.caption(
+        f"「📈上昇中/📉下降中」: ゴールデンクロス発生時点の株価から、"
+        f"{screener.GOLDEN_CROSS_CONFIRM_DAYS}営業日後の株価が下の数値入力で指定した"
+        "変動率(%)以上動いていれば表示する(既定は±3%)。それ未満の変動は「発生」とだけ表示、"
+        f"まだ{screener.GOLDEN_CROSS_CONFIRM_DAYS}営業日経っていない銘柄は判定不能。"
     )
     st.caption(
         f"安定上昇型(3ヶ月/6ヶ月/1年): 対数終値に回帰直線を当てはめ、傾きがプラスかつ決定係数"
@@ -2116,6 +2126,16 @@ else:
         "GC乖離中", key="golden_diverging_only",
         help="一度接近したのに交差せず再び乖離し始めている銘柄のみ(不発の警戒シグナル)。"
         "バックテストの結果、この状態はその後の株価が悪化する傾向を確認済み。",
+    )
+    golden_move_threshold = st.number_input(
+        f"GC発生{screener.GOLDEN_CROSS_CONFIRM_DAYS}営業日後の上昇中/下降中と見なす変動率(%)",
+        min_value=0.5, value=3.0, step=0.5, key="golden_move_threshold",
+        help=f"ゴールデンクロス発生時点の株価から、{screener.GOLDEN_CROSS_CONFIRM_DAYS}営業日後の"
+        "株価がこの値以上上がっていれば「📈上昇中」、この値以上下がっていれば「📉下降中」と表示する。"
+        "それ未満は「発生」のみ表示。バックテストの結果、5営業日後の値動きが6ヶ月後のリターンと"
+        "順位相関0.234と、この期間の値動きにはその後を占う情報がある(まだ5営業日経っていない"
+        "銘柄は判定不能)。既定値3%は、勝率の差(上昇中70.9% vs 下降中38.4%)と該当件数の"
+        "バランスを見て選定(backtest_dcr_imminent_failure.py関連の追加検証より)。",
     )
     golden_strong_sector_only = st.checkbox(
         "効きが強い業種(電気・ガス業/建設業/銀行業/不動産業/卸売業/機械 等)",
@@ -2216,7 +2236,14 @@ else:
             # 型式の名前は表示せず、色付きの丸(🟢=早復型/⚪=通常型)で区別する
             dot = "🟢" if row.get("golden_cross_is_quick_recovery") else "⚪"
             if row["golden_cross_status"] == "crossed":
-                return f"{dot} 発生({int(row['golden_cross_days_since'])}営業日前)"
+                pct = row.get("golden_cross_pct_after_confirm")
+                move_tag = ""
+                if pd.notna(pct):
+                    if pct >= golden_move_threshold:
+                        move_tag = f" 📈上昇中({pct:+.1f}%)"
+                    elif pct <= -golden_move_threshold:
+                        move_tag = f" 📉下降中({pct:+.1f}%)"
+                return f"{dot} 発生({int(row['golden_cross_days_since'])}営業日前){move_tag}"
             if row["golden_cross_status"] == "imminent":
                 return f"{dot} 接近中(乖離{row['golden_cross_gap_pct']:.2f}%)"
             if row["golden_cross_status"] == "diverging":
