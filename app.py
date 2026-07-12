@@ -2014,9 +2014,16 @@ with st.expander("条件・用語の説明", expanded=False):
         "25日移動平均線が75日移動平均線を下から上に抜けるのがゴールデンクロス。"
         f"直近{screener.GOLDEN_CROSS_RECENT_DAYS}営業日以内に交差していれば「発生」、"
         "まだ交差していないが乖離(25日線-75日線)が縮まってきていて25日線が上向きの場合は"
-        "「兆候あり」として表示する(兆候はあくまで参考の早期シグナルで、実際には交差せず"
-        "反転することもある)。「上昇基調銘柄」は1年間ずっと上昇している銘柄向けの条件のため、"
+        "「接近中」として表示する(あくまで参考の早期シグナルで、実際には交差せず反転する"
+        "こともある)。「上昇基調銘柄」は1年間ずっと上昇している銘柄向けの条件のため、"
         "まだそこまで育っていない、これから上昇が始まるかもしれない銘柄を早めに拾う用途。"
+    )
+    st.caption(
+        "「乖離中」: 直近30営業日以内に一度「接近中」の水準まで縮まったのに、交差しないまま"
+        "再び乖離が広がり始めている状態(接近が不発に終わりつつある)。バックテストの結果、"
+        "この「不発」パターンはその後の株価が明確に悪化する傾向を年別に見ても確認済み"
+        "(勝率が転換成功時と比べて18〜36ポイント低い。backtest_dcr_imminent_failure.py参照)。"
+        "単に見えなくするのではなく、警戒シグナルとして明示している。"
     )
     st.caption(
         f"安定上昇型(3ヶ月/6ヶ月/1年): 対数終値に回帰直線を当てはめ、傾きがプラスかつ決定係数"
@@ -2087,7 +2094,7 @@ else:
         "🌟 DCR法(早復型×配当利回り2.0%以上)",
         value=True, key="golden_recommended_only",
     )
-    gc1, gc2, gc3, gc4 = st.columns(4)
+    gc1, gc2, gc3, gc4, gc5 = st.columns(5)
     golden_quick_recovery_only = gc1.checkbox(
         "早復型", key="golden_quick_recovery_only",
         help="デッドクロス後、短期間で立て直したパターン(クイックリカバリー型)",
@@ -2099,11 +2106,16 @@ else:
     )
     golden_crossed_only = gc3.checkbox(
         "GC発生済み", key="golden_crossed_only",
-        help="すでにゴールデンクロスが発生した銘柄のみ(兆候ありは除く)",
+        help="すでにゴールデンクロスが発生した銘柄のみ(接近中・乖離中は除く)",
     )
     golden_imminent_only = gc4.checkbox(
-        "GC兆候あり", key="golden_imminent_only",
-        help="まだ交差していないが兆候がある銘柄のみ(発生済みは除く)",
+        "GC接近中", key="golden_imminent_only",
+        help="まだ交差していないが接近している銘柄のみ(発生済み・乖離中は除く)",
+    )
+    golden_diverging_only = gc5.checkbox(
+        "GC乖離中", key="golden_diverging_only",
+        help="一度接近したのに交差せず再び乖離し始めている銘柄のみ(不発の警戒シグナル)。"
+        "バックテストの結果、この状態はその後の株価が悪化する傾向を確認済み。",
     )
     golden_strong_sector_only = st.checkbox(
         "効きが強い業種(電気・ガス業/建設業/銀行業/不動産業/卸売業/機械 等)",
@@ -2179,6 +2191,8 @@ else:
         golden_candidates = golden_candidates[golden_candidates["golden_cross_status"] == "crossed"]
     if golden_imminent_only:
         golden_candidates = golden_candidates[golden_candidates["golden_cross_status"] == "imminent"]
+    if golden_diverging_only:
+        golden_candidates = golden_candidates[golden_candidates["golden_cross_status"] == "diverging"]
     if golden_strong_sector_only:
         golden_candidates = golden_candidates[golden_candidates["業種"].isin(GOLDEN_CROSS_STRONG_SECTORS)]
     if golden_weak_sector_only:
@@ -2193,7 +2207,10 @@ else:
     if golden_candidates.empty:
         st.info("該当銘柄はありません。")
     else:
-        st.caption("「ゴールデンクロス」列: 🟢=早復型(クイックリカバリー型)　⚪=通常型")
+        st.caption(
+            "「ゴールデンクロス」列: 🟢=早復型(クイックリカバリー型)　⚪=通常型　"
+            "／　発生・接近中・乖離中(不発の警戒シグナル)"
+        )
 
         def _golden_cross_label(row: pd.Series) -> str | None:
             # 型式の名前は表示せず、色付きの丸(🟢=早復型/⚪=通常型)で区別する
@@ -2201,7 +2218,9 @@ else:
             if row["golden_cross_status"] == "crossed":
                 return f"{dot} 発生({int(row['golden_cross_days_since'])}営業日前)"
             if row["golden_cross_status"] == "imminent":
-                return f"{dot} 兆候あり(乖離{row['golden_cross_gap_pct']:.2f}%)"
+                return f"{dot} 接近中(乖離{row['golden_cross_gap_pct']:.2f}%)"
+            if row["golden_cross_status"] == "diverging":
+                return f"{dot} ⚠️乖離中(乖離{row['golden_cross_gap_pct']:.2f}%)"
             return None
 
         golden_candidates["ゴールデンクロス"] = golden_candidates.apply(_golden_cross_label, axis=1)
@@ -2214,7 +2233,7 @@ else:
                 "dividend_yield_pct", ascending=False, na_position="last"
             ).reset_index(drop=True)
         else:
-            status_order = {"crossed": 0, "imminent": 1}
+            status_order = {"crossed": 0, "imminent": 1, "diverging": 2}
             golden_candidates["_status_sort"] = golden_candidates["golden_cross_status"].map(status_order)
             # 早復型を同じステータス内で上位に表示する
             golden_candidates["_quick_sort"] = (~golden_candidates["golden_cross_is_quick_recovery"].fillna(False)).astype(int)
@@ -2329,6 +2348,7 @@ else:
     st.caption(f"該当: {len(result)}件")
     RANKING_EXCLUDED_COLUMNS = {
         "tendency_n", "golden_cross_status", "golden_cross_days_since", "golden_cross_gap_pct",
+        "golden_cross_peak_gap_pct",
     }
     ranking_columns = [c for c in result.columns if c not in RANKING_EXCLUDED_COLUMNS]
     render_fundamentals_picker(result, ranking_columns, key_prefix="ranking")

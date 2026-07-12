@@ -47,6 +47,10 @@ MA_GOLDEN_LONG_WINDOW = 75    # 長期線
 GOLDEN_CROSS_RECENT_DAYS = 10        # この日数以内に交差していれば「発生して間もない」扱い
 GOLDEN_CROSS_IMMINENT_LOOKBACK = 10  # 乖離が縮まってきているかを見る比較窓
 GOLDEN_CROSS_IMMINENT_GAP_THRESHOLD = -0.03  # 乖離率(25日線-75日線)÷株価がこの値以上(0に近い)なら「間近」
+# 「接近中」だった後、交差せずに再び乖離し始めていないかを確認する窓。バックテストの結果
+# (backtest_dcr_imminent_failure.py)、この「不発」パターンはその後の株価がはっきり悪化する
+# 傾向を年別に見ても確認済みのため、単に非表示にするのではなく「乖離中」として明示する。
+GOLDEN_CROSS_DIVERGE_LOOKBACK = 30
 
 # 「クイックリカバリー型」判定用: 直近のゴールデンクロスの前に、この営業日数以内で
 # デッドクロス(25日線が75日線を下から上ではなく上から下に抜ける)があったかを見る。
@@ -223,22 +227,50 @@ def _golden_cross_status(close: pd.Series) -> dict | None:
     short_prior = ma_short.iloc[-1 - GOLDEN_CROSS_IMMINENT_LOOKBACK]
     short_rising = bool(ma_short.iloc[-1] > short_prior) if pd.notna(short_prior) else False
 
+    # クロス前かどうかに関わらず、直近のデッドクロス日は「接近中」「乖離中」どちらでも使う。
+    crossed_down = (gap.shift(1) >= 0) & (gap < 0)
+    dead_positions = np.flatnonzero(crossed_down.to_numpy())
+    is_quick_recovery = False
+    dead_cross_date = None
+    if len(dead_positions):
+        days_since_dead = (len(gap) - 1) - dead_positions[-1]
+        is_quick_recovery = 0 < days_since_dead <= QUICK_RECOVERY_MAX_DAYS
+        # 早復型の見込みかどうかに関わらず、直前のデッドクロス日は分かる限り表示する
+        dead_cross_date = gap.index[dead_positions[-1]]
+
     if narrowing and short_rising and gap_today >= GOLDEN_CROSS_IMMINENT_GAP_THRESHOLD:
         # このまま交差した場合に「クイックリカバリー型」になりそうか
         # (直近QUICK_RECOVERY_MAX_DAYS営業日以内にデッドクロスがあったか)も合わせて示す。
-        crossed_down = (gap.shift(1) >= 0) & (gap < 0)
-        dead_positions = np.flatnonzero(crossed_down.to_numpy())
-        is_quick_recovery = False
-        dead_cross_date = None
-        if len(dead_positions):
-            days_since_dead = (len(gap) - 1) - dead_positions[-1]
-            is_quick_recovery = 0 < days_since_dead <= QUICK_RECOVERY_MAX_DAYS
-            # 早復型の見込みかどうかに関わらず、直前のデッドクロス日は分かる限り表示する
-            dead_cross_date = gap.index[dead_positions[-1]]
         return {
             "status": "imminent", "gap_pct": gap_today * 100,
             "is_quick_recovery": is_quick_recovery, "dead_cross_date": dead_cross_date,
         }
+
+    # 「接近中」ではないが、直近で交差に近づいた後、再び乖離し始めていないか確認する。
+    # バックテストの結果、この「不発」パターン(接近→未交差のまま後退)はその後の株価が
+    # 明確に悪化する傾向を年別に見ても確認済み(backtest_dcr_imminent_failure.py参照、
+    # 転換成功時と比べて勝率が18〜36ポイント低い)。単に非表示にせず「乖離中」として明示する。
+    if len(gap) >= GOLDEN_CROSS_DIVERGE_LOOKBACK + 1:
+        recent_window = gap.tail(GOLDEN_CROSS_DIVERGE_LOOKBACK)
+        # 交差済み(gap>=0)の点は「接近したが未交差」の対象外にする(それは別の話=一度
+        # 交差してから再度デッドクロスしたケースで、ここで扱う「不発」とは区別する)。
+        pre_cross_window = recent_window[recent_window < 0]
+        if pre_cross_window.empty:
+            return None
+        peak_pos_in_window = int(np.argmax(pre_cross_window.to_numpy()))
+        peak_gap = float(pre_cross_window.iloc[peak_pos_in_window])
+        peak_date = pre_cross_window.index[peak_pos_in_window]
+        days_since_peak = (len(gap) - 1) - gap.index.get_indexer([peak_date])[0]
+        if (
+            peak_gap >= GOLDEN_CROSS_IMMINENT_GAP_THRESHOLD
+            and days_since_peak >= GOLDEN_CROSS_IMMINENT_LOOKBACK
+            and gap_today < peak_gap
+        ):
+            return {
+                "status": "diverging", "gap_pct": gap_today * 100,
+                "peak_gap_pct": peak_gap * 100,
+                "is_quick_recovery": is_quick_recovery, "dead_cross_date": dead_cross_date,
+            }
     return None
 
 
@@ -530,7 +562,12 @@ def screen(tickers: list[dict], as_of: str | date | None = None) -> pd.DataFrame
                 ),
                 "golden_cross_gap_pct": (
                     round(golden_cross["gap_pct"], 2)
-                    if golden_cross and golden_cross["status"] == "imminent"
+                    if golden_cross and golden_cross["status"] in ("imminent", "diverging")
+                    else None
+                ),
+                "golden_cross_peak_gap_pct": (
+                    round(golden_cross["peak_gap_pct"], 2)
+                    if golden_cross and golden_cross["status"] == "diverging"
                     else None
                 ),
                 "golden_cross_is_quick_recovery": (
