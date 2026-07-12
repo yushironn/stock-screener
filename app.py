@@ -458,6 +458,10 @@ def add_tendency_summary(df: pd.DataFrame) -> pd.DataFrame:
 PERIOD_OPTIONS = {"1ヶ月": "1mo", "3ヶ月": "3mo", "6ヶ月": "6mo", "1年": "1y", "3年": "3y"}
 
 
+TOPIX_TICKER = "1306.T"  # TOPIX連動型上場投信(ETF)。指数そのものではないが、価格キャッシュが
+# 既にあり値動きはTOPIXにほぼ連動するため、比較チャートの代用として使う。
+
+
 def render_ma_chart(code: str, prior_high: float, key_prefix: str) -> None:
     """
     表示期間選択+終値+移動平均線+52週高値ラインのチャートを描画する
@@ -529,6 +533,50 @@ def render_ma_chart(code: str, prior_high: float, key_prefix: str) -> None:
         )
     )
     st.altair_chart(chart, use_container_width=True)
+
+    show_topix = st.checkbox(
+        "TOPIXと比較(相対リターン%)", value=True, key=f"{key_prefix}_topix_compare",
+        help="株価とTOPIX(1306.T、TOPIX連動ETFで代用)を、表示期間の開始時点をそれぞれ100として"
+        "指数化し、同じ軸で比較する。市場全体より強いか弱いかが分かる。",
+    )
+    if show_topix:
+        topix_hist = fetch_chart_history(TOPIX_TICKER, PERIOD_OPTIONS[period_label])
+        if topix_hist.empty:
+            st.caption("TOPIX比較用データの取得に失敗しました。")
+        else:
+            stock_close = hist["Close"].dropna()
+            topix_close = topix_hist["Close"].dropna()
+            common_start = max(stock_close.index.min(), topix_close.index.min())
+            stock_rel = stock_close[stock_close.index >= common_start]
+            topix_rel = topix_close[topix_close.index >= common_start]
+            if stock_rel.empty or topix_rel.empty:
+                st.caption("TOPIX比較: 重なる期間のデータがありません。")
+            else:
+                rel_df = pd.DataFrame({
+                    "銘柄": stock_rel / stock_rel.iloc[0] * 100,
+                    "TOPIX": topix_rel / topix_rel.iloc[0] * 100,
+                })
+                rel_reset = rel_df.reset_index()
+                rel_date_col = rel_reset.columns[0]
+                rel_long = rel_reset.melt(id_vars=rel_date_col, var_name="系列", value_name="指数(開始時点=100)")
+                rel_chart = (
+                    alt.Chart(rel_long)
+                    .mark_line(clip=True)
+                    .encode(
+                        x=alt.X(
+                            f"{rel_date_col}:T", title=None,
+                            axis=alt.Axis(format=x_format, labelAngle=0),
+                        ),
+                        y=alt.Y("指数(開始時点=100):Q", title=None),
+                        color=alt.Color(
+                            "系列:N", title=None,
+                            scale=alt.Scale(
+                                domain=["銘柄", "TOPIX"], range=["#e63946", "#457b9d"]
+                            ),
+                        ),
+                    )
+                )
+                st.altair_chart(rel_chart, use_container_width=True)
 
 
 st.set_page_config(page_title="安全成長・急成長株スクリーナー", layout="wide")
