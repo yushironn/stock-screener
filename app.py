@@ -640,6 +640,33 @@ def _clear_all():
 
 with st.sidebar:
     st.header("設定")
+
+    # TOPIXの方向性(1306.T=TOPIX連動ETFの価格キャッシュで代用)。200日線の上/下と
+    # 直近1ヶ月・3ヶ月のリターンを表示するだけの参考情報(警告やフィルタではない)。
+    _topix_hist = screener._load_cache(TOPIX_TICKER)
+    if _topix_hist is not None and not _topix_hist.empty:
+        _topix_close = _topix_hist["Close"].dropna()
+        _topix_ma200 = _topix_close.rolling(200).mean()
+        _topix_latest = float(_topix_close.iloc[-1])
+        _topix_ma200_latest = _topix_ma200.iloc[-1]
+        _topix_above_ma200 = (
+            _topix_latest > _topix_ma200_latest if pd.notna(_topix_ma200_latest) else None
+        )
+        _topix_dot = "🟢" if _topix_above_ma200 else ("🔴" if _topix_above_ma200 is False else "⚪")
+
+        def _topix_period_return(days: int) -> float | None:
+            if len(_topix_close) <= days:
+                return None
+            return float(_topix_close.iloc[-1] / _topix_close.iloc[-1 - days] - 1) * 100
+
+        _topix_1m = _topix_period_return(21)
+        _topix_3m = _topix_period_return(63)
+        _topix_line = f"{_topix_dot} TOPIX動向: 200日線"
+        _topix_line += "の上" if _topix_above_ma200 else ("の下" if _topix_above_ma200 is False else "判定不可")
+        if _topix_1m is not None and _topix_3m is not None:
+            _topix_line += f"(1ヶ月{_topix_1m:+.1f}% / 3ヶ月{_topix_3m:+.1f}%)"
+        st.caption(_topix_line)
+
     # 実際に表示中のデータがいつ時点のものかは、この後の計算(result)が終わるまで
     # 分からないため、st.emptyでプレースホルダーを確保しておき、計算が終わった時点で
     # 中身を書き込む(サイドバーのこの位置に、同じスクリプト実行内で反映される)。
