@@ -19,6 +19,7 @@ import quality_score
 import screener
 
 SHARES_OUTSTANDING_CACHE_FILE = Path(__file__).parent / "cache" / "shares_outstanding.json"
+DIVIDEND_PER_SHARE_CACHE_FILE = Path(__file__).parent / "cache" / "dividend_per_share.json"
 # クラウド環境等、cache/quality/がまるごと無い(=ローカルキャッシュが空の)場合に使う
 # フォールバック。ローカルPCがdaily_refresh.pyでbuild_quality_table()の結果を
 # 定期生成・GitHubにpushしたスナップショット。
@@ -40,6 +41,23 @@ def _load_shares_outstanding_cache() -> dict[str, float]:
         return {}
     try:
         return json.loads(SHARES_OUTSTANDING_CACHE_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _load_dividend_per_share_cache() -> dict[str, float]:
+    """
+    yfinance(backfill_dividend_per_share.py)由来の、直近12ヶ月の1株配当合計額
+    キャッシュを読み込む。有価証券報告書CF計算書の「配当金の支払額」(連結ベースの
+    総支払額。少数株主への配当や現金支払いタイミングのズレが混ざる)より、
+    ヤフーファイナンス等が表示する1株配当利回りに近い定義になる。
+    バックテスト(backtest_dividend_yield_methods.py)で、既存方式を将来リターンとの
+    相関で一度も下回らなかったため、取得できている銘柄はこちらを優先して使う。
+    """
+    if not DIVIDEND_PER_SHARE_CACHE_FILE.exists():
+        return {}
+    try:
+        return json.loads(DIVIDEND_PER_SHARE_CACHE_FILE.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {}
 
@@ -169,6 +187,7 @@ def build_quality_table(codes: list[str] | None = None) -> pd.DataFrame:
 
     sector_map = _load_sector_map()
     shares_outstanding_cache = _load_shares_outstanding_cache()
+    dividend_per_share_cache = _load_dividend_per_share_cache()
 
     rows = []
     for code in codes:
@@ -203,9 +222,17 @@ def build_quality_table(codes: list[str] | None = None) -> pd.DataFrame:
             row["net_income_growth_latest"] * 100
             if row.get("net_income_growth_latest") is not None else None
         )
+        # 配当利回り(%)。yfinance由来の直近12ヶ月の1株配当合計(ヤフーファイナンス等が
+        # 表示する定義に近く、バックテストで既存方式を一度も下回らなかった)が取れて
+        # いればそちらを優先し、無ければ有価証券報告書CF計算書の「配当金の支払額」
+        # (連結ベースの総支払額の近似値)にフォールバックする。
+        per_share_dividend = dividend_per_share_cache.get(sec_code)
+        if per_share_dividend is not None and price:
+            dividend_yield_pct = per_share_dividend / price * 100
+        else:
+            dividend_yield_pct = growth_scores.dividend_yield(record.get("dividends_paid_cf"), market_cap)
         # リンチレシオ(PER÷(純利益成長率%+配当利回り%))。バックテストでPEG
         # (増益率のみ)より将来リターンとの相関が同等以上だったため採用している。
-        dividend_yield_pct = growth_scores.dividend_yield(record.get("dividends_paid_cf"), market_cap)
         row["dividend_yield_pct"] = dividend_yield_pct
         # 配当性向(%) = |配当支払額| ÷ 純利益 × 100。純利益が赤字/ゼロの場合は計算不能(None)。
         # バックテストの結果、DCR法(早復型ゴールデンクロス×配当利回り)の対象銘柄では
